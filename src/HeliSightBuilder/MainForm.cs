@@ -479,15 +479,21 @@ public sealed class MainForm : Form
         graphics.DrawRectangle(pen, Math.Min(a.X, b.X), Math.Min(a.Y, b.Y), Math.Abs(b.X - a.X), Math.Abs(b.Y - a.Y));
     }
 
-    private List<SightItem> ParseCommands()
+    private List<SightItem> ParseCommands(string? source = null)
     {
         var result = new List<SightItem>();
-        foreach (System.Text.RegularExpressions.Match m in SightLogic.CommandRegex().Matches(commands.Text))
+        foreach (System.Text.RegularExpressions.Match m in SightLogic.CommandRegex().Matches(source ?? commands.Text))
         {
             var values = System.Text.RegularExpressions.Regex.Matches(m.Groups[2].Value, @"[-+]?(?:\d+\.\d+|\d+|\.\d+)(?:[eE][-+]?\d+)?")
                 .Select(n => double.Parse(n.Value, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
             if (values.Length < 4) continue;
-            result.Add(new(m.Groups[1].Value switch { "VECTOR_LINE"=>SightItemKind.Line, "VECTOR_ELLIPSE"=>SightItemKind.Ellipse, _=>SightItemKind.Rectangle },values[0],values[1],values[2],values[3]));
+            var kind = m.Groups[1].Value switch
+            {
+                "VECTOR_LINE" => SightItemKind.Line,
+                "VECTOR_ELLIPSE" => SightItemKind.Ellipse,
+                _ => SightItemKind.Rectangle
+            };
+            result.Add(new(kind, values[0], values[1], values[2], values[3]));
         }
         return result;
     }
@@ -496,15 +502,29 @@ public sealed class MainForm : Form
     {
         using var dialog = new OpenFileDialog { Filter = "SVG line art (*.svg)|*.svg|All files (*.*)|*.*" };
         if (dialog.ShowDialog() != DialogResult.OK) return;
-        try { items.AddRange(SightLogic.ImportSvg(dialog.FileName)); selected = items.Count - 1; shape.SelectedItem = "Custom"; Changed(); }
-        catch (Exception ex) { MessageBox.Show(this, ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        try
+        {
+            items.AddRange(SightLogic.ImportSvg(dialog.FileName));
+            selected = items.Count - 1;
+            shape.SelectedItem = "Custom";
+            Changed();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
     }
-    private void Nudge(double dx,double dy)
+
+    private void Nudge(double dx, double dy)
     {
-        if(selected<0||selected>=items.Count)return; var i=items[selected];
-        items[selected]=i.Kind==SightItemKind.Line?i with { X1=i.X1+dx,Y1=i.Y1+dy,X2=i.X2+dx,Y2=i.Y2+dy }:i with { X1=i.X1+dx,Y1=i.Y1+dy };
+        if (selected < 0 || selected >= items.Count) return;
+        var item = items[selected];
+        items[selected] = item.Kind == SightItemKind.Line
+            ? item with { X1 = item.X1 + dx, Y1 = item.Y1 + dy, X2 = item.X2 + dx, Y2 = item.Y2 + dy }
+            : item with { X1 = item.X1 + dx, Y1 = item.Y1 + dy };
         Changed();
     }
+
     private bool SelectAt(PointF point)
     {
         var customScale = Math.Max(.01, (double)scale.Value / 100);
@@ -566,10 +586,13 @@ public sealed class MainForm : Form
         valueCLabel.Text = i.Kind switch { SightItemKind.Line => "X2", SightItemKind.Ellipse => "R X", _ => "W" };
         valueDLabel.Text = i.Kind switch { SightItemKind.Line => "Y2", SightItemKind.Ellipse => "R Y", _ => "H" };
         loading = true;
-        valueA.Value = Clamp(valueA, i.X1); valueB.Value = Clamp(valueB, i.Y1);
-        valueC.Value = Clamp(valueC, i.X2); valueD.Value = Clamp(valueD, i.Y2);
+        valueA.Value = Clamp(valueA, i.X1);
+        valueB.Value = Clamp(valueB, i.Y1);
+        valueC.Value = Clamp(valueC, i.X2);
+        valueD.Value = Clamp(valueD, i.Y2);
         loading = false;
     }
+
     private void ApplyValues()
     {
         if (selected < 0 || selected >= items.Count) return;
@@ -579,29 +602,58 @@ public sealed class MainForm : Form
             current.Kind == SightItemKind.Ellipse ? Math.Abs((double)valueD.Value) : (double)valueD.Value);
         Changed();
     }
-    private void UseSelectedOrigin() { if(selected>=0&&selected<items.Count){var p=items[selected].Center;originX.Value=Clamp(originX,p.X);originY.Value=Clamp(originY,p.Y);Changed();} }
-    private void ChooseOutput(object? sender,EventArgs e) { using var d=new FolderBrowserDialog{InitialDirectory=output.Text};if(d.ShowDialog()==DialogResult.OK){output.Text=d.SelectedPath;Changed();} }
+    private void UseSelectedOrigin()
+    {
+        if (selected < 0 || selected >= items.Count) return;
+        var point = items[selected].Center;
+        originX.Value = Clamp(originX, point.X);
+        originY.Value = Clamp(originY, point.Y);
+        Changed();
+    }
+
+    private void ChooseOutput(object? sender, EventArgs e)
+    {
+        using var dialog = new FolderBrowserDialog { InitialDirectory = output.Text };
+        if (dialog.ShowDialog() != DialogResult.OK) return;
+        output.Text = dialog.SelectedPath;
+        Changed();
+    }
 
     private void BuildPackage(object? sender, EventArgs e)
     {
         string? temp = null;
         try
         {
-            var root=AppContext.BaseDirectory; var source=Path.Combine(root,"Resources","source"); var template=Path.Combine(root,"Resources","template");
-            if(!Directory.Exists(source)) throw new DirectoryNotFoundException("Bundled source resources are missing.");
-            temp=Path.Combine(Path.GetTempPath(),"HeliSightBuilder",Guid.NewGuid().ToString("N"));
-            CopyDirectory(source,temp);
-            var air=Path.Combine(temp,"reactivegui","airHudElems.nut");
-            var commandText=commands.Text; var mode0=Shift(commandText,0,100); var mode1=Shift(commandText,0,0);
-            File.WriteAllText(air,SightLogic.ReplaceSightFunction(File.ReadAllText(air),mode0,mode1,ColorValue()),new UTF8Encoding(false));
-            var pkg=Path.Combine(output.Text,"pkg_user"); Directory.CreateDirectory(pkg);
-            VromfsPackage.Build(Path.Combine(template,"pkg_user","base.vromfs.bin"),temp,Path.Combine(pkg,"base.vromfs.bin"));
-            File.Copy(Path.Combine(template,"pkg_user.rq2"),Path.Combine(output.Text,"pkg_user.rq2"),true);
-            File.Copy(Path.Combine(template,"pkg_user.ver"),Path.Combine(output.Text,"pkg_user.ver"),true);
-            status.Text=$"Built: {output.Text}";
-            MessageBox.Show(this,$"Built install files in:\n\n{output.Text}",Text,MessageBoxButtons.OK,MessageBoxIcon.Information);
+            var root = AppContext.BaseDirectory;
+            var source = Path.Combine(root, "Resources", "source");
+            var template = Path.Combine(root, "Resources", "template");
+            if (!Directory.Exists(source))
+                throw new DirectoryNotFoundException("Bundled source resources are missing.");
+
+            temp = Path.Combine(Path.GetTempPath(), "HeliSightBuilder", Guid.NewGuid().ToString("N"));
+            CopyDirectory(source, temp);
+            var air = Path.Combine(temp, "reactivegui", "airHudElems.nut");
+            var commandText = commands.Text;
+            var mode0 = Shift(commandText, 0, 100);
+            var mode1 = Shift(commandText, 0, 0);
+            var updatedHud = SightLogic.ReplaceSightFunction(File.ReadAllText(air), mode0, mode1, ColorValue());
+            File.WriteAllText(air, updatedHud, new UTF8Encoding(false));
+
+            var packageDirectory = Path.Combine(output.Text, "pkg_user");
+            Directory.CreateDirectory(packageDirectory);
+            VromfsPackage.Build(Path.Combine(template, "pkg_user", "base.vromfs.bin"), temp,
+                Path.Combine(packageDirectory, "base.vromfs.bin"));
+            File.Copy(Path.Combine(template, "pkg_user.rq2"), Path.Combine(output.Text, "pkg_user.rq2"), true);
+            File.Copy(Path.Combine(template, "pkg_user.ver"), Path.Combine(output.Text, "pkg_user.ver"), true);
+            status.Text = $"Built: {output.Text}";
+            MessageBox.Show(this, $"Built install files in:\n\n{output.Text}", Text,
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
-        catch(Exception ex){status.Text="Build failed";MessageBox.Show(this,ex.ToString(),Text,MessageBoxButtons.OK,MessageBoxIcon.Error);}
+        catch (Exception ex)
+        {
+            status.Text = "Build failed";
+            MessageBox.Show(this, ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
         finally
         {
             if (temp is not null && Directory.Exists(temp))
@@ -612,21 +664,63 @@ public sealed class MainForm : Form
         }
     }
 
-    private string Shift(string text,double targetX,double targetY)
+    private string Shift(string text, double targetX, double targetY)
     {
-        var parsed=ParseCommands(); if(parsed.Count==0)return text;
-        var left=parsed.Min(i=>i.Bounds.Left);var top=parsed.Min(i=>i.Bounds.Top);var right=parsed.Max(i=>i.Bounds.Right);var bottom=parsed.Max(i=>i.Bounds.Bottom);
-        var originOutX=(double)originX.Value*(double)scale.Value/100;var originOutY=(double)originY.Value*(double)scale.Value/100;
-        var dx=targetX-originOutX;var dy=targetY-originOutY;
-        return SightLogic.Commands(parsed.Select(i=>i.Kind==SightItemKind.Line?i with{X1=i.X1+dx,Y1=i.Y1+dy,X2=i.X2+dx,Y2=i.Y2+dy}:i with{X1=i.X1+dx,Y1=i.Y1+dy}));
+        var parsed = ParseCommands(text);
+        if (parsed.Count == 0) return text;
+        var originOutX = (double)originX.Value * (double)scale.Value / 100;
+        var originOutY = (double)originY.Value * (double)scale.Value / 100;
+        var dx = targetX - originOutX;
+        var dy = targetY - originOutY;
+        return SightLogic.Commands(parsed.Select(item => item.Kind == SightItemKind.Line
+            ? item with { X1 = item.X1 + dx, Y1 = item.Y1 + dy, X2 = item.X2 + dx, Y2 = item.Y2 + dy }
+            : item with { X1 = item.X1 + dx, Y1 = item.Y1 + dy }));
     }
 
-    private void UpdateDiagnostics() { diagnostics.Text=$"{ParseCommands().Count} vector commands | {Encoding.UTF8.GetByteCount(commands.Text):N0} command bytes | package growth supported"; }
-    private void SaveAutosave(){try{Directory.CreateDirectory(Path.GetDirectoryName(autosavePath)!);File.WriteAllText(autosavePath,JsonSerializer.Serialize(CaptureState()));}catch{}}
-    private void LoadAutosave(){try{if(File.Exists(autosavePath)){var s=JsonSerializer.Deserialize<AppState>(File.ReadAllText(autosavePath));if(s is not null)Restore(s);}}catch{}}
-    private Color ColorValue()=>color.Text switch{"Green"=>Color.FromArgb(60,255,90),"Amber"=>Color.FromArgb(255,190,40),"Red"=>Color.FromArgb(255,70,70),"Cyan"=>Color.FromArgb(80,230,255),_=>Color.White};
-    private double Pixels=>6*(double)zoom.Value/100;
-    private PointF ToWorld(Point p)=>new((float)((p.X-canvas.ClientSize.Width/2-pan.X)/Pixels),(float)((p.Y-canvas.ClientSize.Height/2-pan.Y)/Pixels));
+    private void UpdateDiagnostics() =>
+        diagnostics.Text = $"{ParseCommands().Count} vector commands | " +
+            $"{Encoding.UTF8.GetByteCount(commands.Text):N0} command bytes | package growth supported";
+
+    private void SaveAutosave()
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(autosavePath)!);
+            File.WriteAllText(autosavePath, JsonSerializer.Serialize(CaptureState()));
+        }
+        catch
+        {
+            // Autosave failure must not interrupt editing.
+        }
+    }
+
+    private void LoadAutosave()
+    {
+        try
+        {
+            if (!File.Exists(autosavePath)) return;
+            var state = JsonSerializer.Deserialize<AppState>(File.ReadAllText(autosavePath));
+            if (state is not null) Restore(state);
+        }
+        catch
+        {
+            // Ignore invalid or inaccessible autosave data.
+        }
+    }
+
+    private Color ColorValue() => color.Text switch
+    {
+        "Green" => Color.FromArgb(60, 255, 90),
+        "Amber" => Color.FromArgb(255, 190, 40),
+        "Red" => Color.FromArgb(255, 70, 70),
+        "Cyan" => Color.FromArgb(80, 230, 255),
+        _ => Color.White
+    };
+
+    private double Pixels => 6 * (double)zoom.Value / 100;
+    private PointF ToWorld(Point p) => new(
+        (float)((p.X - canvas.ClientSize.Width / 2 - pan.X) / Pixels),
+        (float)((p.Y - canvas.ClientSize.Height / 2 - pan.Y) / Pixels));
     private PointF ToDesign(Point p, bool applySnap = true)
     {
         var outputPoint = ToWorld(p);
@@ -637,8 +731,11 @@ public sealed class MainForm : Form
             ? new PointF((float)Snap(x), (float)Snap(y))
             : new PointF((float)x, (float)y);
     }
-    private PointF ToScreen(double x,double y)=>new((float)(canvas.ClientSize.Width/2+pan.X+x*Pixels),(float)(canvas.ClientSize.Height/2+pan.Y+y*Pixels));
-    private double Snap(double v)=>snap.Checked?Math.Round(v/(double)grid.Value)*(double)grid.Value:v;
+    private PointF ToScreen(double x, double y) => new(
+        (float)(canvas.ClientSize.Width / 2 + pan.X + x * Pixels),
+        (float)(canvas.ClientSize.Height / 2 + pan.Y + y * Pixels));
+    private double Snap(double value) =>
+        snap.Checked ? Math.Round(value / (double)grid.Value) * (double)grid.Value : value;
     private void ChangeZoom(decimal multiplier, Point? anchor = null)
     {
         var anchorPoint = anchor ?? new Point(canvas.ClientSize.Width / 2, canvas.ClientSize.Height / 2);
@@ -650,10 +747,30 @@ public sealed class MainForm : Form
     }
     private void UpdateCanvasCursor() => canvas.Cursor = tool.Text == "Pan" ? Cursors.Hand :
         tool.Text == "Select" ? Cursors.Default : Cursors.Cross;
-    private static decimal Clamp(NumericUpDown n,double value)=>Math.Max(n.Minimum,Math.Min(n.Maximum,(decimal)value));
-    private static ComboBox Box(string[] values)=>new(){DropDownStyle=ComboBoxStyle.DropDownList,Width=280,DataSource=values};
-    private static NumericUpDown Number(decimal value,decimal increment,decimal max,decimal min=0)=>new CommitNumericUpDown(){Value=value,Increment=increment,Maximum=max,Minimum=min,DecimalPlaces=2,Width=120};
-    private static Button Button(string text,EventHandler handler){var b=new Button{Text=text,AutoSize=true,MinimumSize=new Size(120,30)};b.Click+=handler;return b;}
+    private static decimal Clamp(NumericUpDown control, double value) =>
+        Math.Max(control.Minimum, Math.Min(control.Maximum, (decimal)value));
+    private static ComboBox Box(string[] values) => new()
+    {
+        DropDownStyle = ComboBoxStyle.DropDownList,
+        Width = 280,
+        DataSource = values
+    };
+    private static NumericUpDown Number(decimal value, decimal increment, decimal max, decimal min = 0) =>
+        new CommitNumericUpDown
+        {
+            Value = value,
+            Increment = increment,
+            Maximum = max,
+            Minimum = min,
+            DecimalPlaces = 2,
+            Width = 120
+        };
+    private static Button Button(string text, EventHandler handler)
+    {
+        var button = new Button { Text = text, AutoSize = true, MinimumSize = new Size(120, 30) };
+        button.Click += handler;
+        return button;
+    }
     private static Button SmallButton(string text, EventHandler handler)
     {
         var button = new Button { Text = text, Size = new Size(34, 28), Margin = new Padding(3) };
@@ -675,7 +792,17 @@ public sealed class MainForm : Form
         pad.Controls.Add(NudgeButton("Right", (_, _) => Nudge((double)nudge.Value, 0)), 2, 1);
         return pad;
     }
-    private static FlowLayoutPanel Row(params Control[] controls){var row=new FlowLayoutPanel{AutoSize=true,WrapContents=false,Margin=new Padding(0,3,0,3)};row.Controls.AddRange(controls);return row;}
+    private static FlowLayoutPanel Row(params Control[] controls)
+    {
+        var row = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            WrapContents = false,
+            Margin = new Padding(0, 3, 0, 3)
+        };
+        row.Controls.AddRange(controls);
+        return row;
+    }
     private static Label Section(string text) => new()
     {
         Text = text,
@@ -686,16 +813,37 @@ public sealed class MainForm : Form
         Padding = new Padding(0, 10, 0, 0),
         Margin = new Padding(3, 5, 3, 0)
     };
-    private static void AddField(FlowLayoutPanel panel,string label,Control control){panel.Controls.Add(new Label{Text=label,AutoSize=true,Margin=new Padding(3,7,3,1)});panel.Controls.Add(control);}
-    private static void CopyDirectory(string source,string target){Directory.CreateDirectory(target);foreach(var file in Directory.GetFiles(source,"*",SearchOption.AllDirectories)){var relative=Path.GetRelativePath(source,file);var dest=Path.Combine(target,relative);Directory.CreateDirectory(Path.GetDirectoryName(dest)!);File.Copy(file,dest,true);}}
+    private static void AddField(FlowLayoutPanel panel, string label, Control control)
+    {
+        panel.Controls.Add(new Label { Text = label, AutoSize = true, Margin = new Padding(3, 7, 3, 1) });
+        panel.Controls.Add(control);
+    }
+
+    private static void CopyDirectory(string source, string target)
+    {
+        Directory.CreateDirectory(target);
+        foreach (var file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(source, file);
+            var destination = Path.Combine(target, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Copy(file, destination, true);
+        }
+    }
 }
 
-public sealed record AppState(string Shape,double Size,double Gap,double Scale,string Color,double OriginX,double OriginY,
-    List<SightItem> Items,int Selected,string Output,string Tool,string Part,double Zoom,bool Snap,double Grid,double Nudge);
+public sealed record AppState(string Shape, double Size, double Gap, double Scale, string Color,
+    double OriginX, double OriginY, List<SightItem> Items, int Selected, string Output,
+    string Tool, string Part, double Zoom, bool Snap, double Grid, double Nudge);
 
 public sealed class DoubleBufferedPanel : Panel
 {
-    public DoubleBufferedPanel(){DoubleBuffered=true;ResizeRedraw=true;TabStop=true;}
+    public DoubleBufferedPanel()
+    {
+        DoubleBuffered = true;
+        ResizeRedraw = true;
+        TabStop = true;
+    }
 }
 
 public sealed class CommitNumericUpDown : NumericUpDown
