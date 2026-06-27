@@ -12,12 +12,12 @@ Consider subscribing to the YouTube channel if the tool is useful to you.
 
 1. Open the latest GitHub Release.
 2. Download `HeliSightBuilder.exe`.
-3. Run the application. The release is a single self-contained Windows file;
-   Python and a separate .NET installation are not required.
+3. Run `HeliSightBuilder.exe`.
 4. Choose an output folder and select **Build install files**.
 
-The single-file release is large because it contains the Microsoft .NET
-desktop runtime, the application, and the required sight-package resources.
+The release is a self-contained Windows application. Its file size includes
+the application, the Microsoft .NET desktop runtime, and the sight-package
+resources.
 
 ## Install a generated sight
 
@@ -40,7 +40,7 @@ them restores the normal game sight.
 - **Line**, **Circle**, **Box**, and **Dot** draw custom geometry.
 - The middle mouse button pans from any tool.
 - The mouse wheel zooms around the cursor.
-- **Custom scale %** changes the complete design without limiting package size.
+- **Custom scale %** changes the size of the complete design.
 - The yellow CCIP marker chooses which point becomes the in-game aiming center.
 - Undo, redo, grid snapping, numeric editing, SVG import, colors, and autosave
   are included.
@@ -78,9 +78,8 @@ container. If an edited entry is larger than its original slot, the writer
 appends it and updates the package table instead of enforcing an artificial
 byte limit.
 
-The application does not request administrator access and contains no update
-service, network client, startup entry, telemetry, obfuscator, or custom
-executable packer.
+The editor works locally and writes only to the output folder selected by the
+user, apart from its autosave file.
 
 ## Source layout
 
@@ -112,14 +111,12 @@ The release executable is written to:
 release\HeliSightBuilder.exe
 ```
 
-The release uses Microsoft's standard self-contained single-file deployment
-with compression disabled. Build outputs are deterministic at the managed
-assembly level, but complete executable hashes can vary with SDK/runtime
-updates.
+The release uses Microsoft's standard self-contained single-file deployment.
+Executable hashes may change when the .NET SDK or runtime is updated.
 
 ## License
 
-Original project code and documentation use
-[CC BY-NC-SA 4.0](LICENSE). Third-party components and game-related property
+Original project code and documentation are available under
+[CC BY-NC-SA 4.0](LICENSE). Third-party components and third-party material
 remain under their respective terms; see [NOTICE.md](NOTICE.md) and
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
