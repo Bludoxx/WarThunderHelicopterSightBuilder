@@ -1,0 +1,7 @@
+bin/
+obj/
+release/
+ui-quality-checks.txt
+*.user
+*.suo
+.vs/
