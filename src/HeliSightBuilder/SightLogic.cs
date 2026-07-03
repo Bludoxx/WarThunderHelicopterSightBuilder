@@ -17,19 +17,28 @@ public static partial class SightLogic
 
     public static string Number(double value)
     {
+        if (!double.IsFinite(value))
+            throw new InvalidDataException("Sight geometry contains a non-finite coordinate.");
         if (Math.Abs(value) < .000001) value = 0;
         return value.ToString("0.###", CultureInfo.InvariantCulture);
     }
 
     public static string Commands(IEnumerable<SightItem> items, double scale = 1)
     {
+        if (!double.IsFinite(scale) || scale <= 0)
+            throw new InvalidDataException("Sight scale must be a positive finite number.");
         var result = items.Select(raw =>
         {
+            if (!EditorStateRules.IsValidItem(raw))
+                throw new InvalidDataException("Sight geometry contains an invalid or excessively large coordinate.");
             var i = raw.Scale(scale);
+            if (!EditorStateRules.IsValidItem(i))
+                throw new InvalidDataException("Scaled sight geometry exceeds the supported coordinate range.");
             return i.Kind switch
             {
                 SightItemKind.Line => $"[VECTOR_LINE, {Number(i.X1)}, {Number(i.Y1)}, {Number(i.X2)}, {Number(i.Y2)}]",
                 SightItemKind.Ellipse => $"[VECTOR_ELLIPSE, {Number(i.X1)}, {Number(i.Y1)}, {Number(Math.Abs(i.X2))}, {Number(Math.Abs(i.Y2))}]",
+                SightItemKind.FilledEllipse => $"[VECTOR_FILLED_ELLIPSE, {Number(i.X1)}, {Number(i.Y1)}, {Number(Math.Abs(i.X2))}, {Number(Math.Abs(i.Y2))}]",
                 _ => $"[VECTOR_RECTANGLE, {Number(i.X1)}, {Number(i.Y1)}, {Number(i.X2)}, {Number(i.Y2)}]"
             };
         }).ToArray();
@@ -42,13 +51,20 @@ public static partial class SightLogic
         var h = size / 2;
         return name switch
         {
-            "Dot" or "Circle" => [new(SightItemKind.Ellipse, 0, 0, Math.Max(.3, h), Math.Max(.3, h))],
+            "Dot" => FilledDot(0, 0, Math.Max(.3, h)),
+            "Circle" => [new(SightItemKind.Ellipse, 0, 0, Math.Max(.3, h), Math.Max(.3, h))],
             "Cross" => [new(SightItemKind.Line, -h, 0, -gap, 0), new(SightItemKind.Line, gap, 0, h, 0),
                 new(SightItemKind.Line, 0, -h, 0, -gap), new(SightItemKind.Line, 0, gap, 0, h)],
             "Box" => [new(SightItemKind.Rectangle, -h, -h, size, size)],
             "T Sight" => [new(SightItemKind.Line, 0, -h, 0, h), new(SightItemKind.Line, -h * .6, -h, h * .6, -h)],
             _ => throw new ArgumentOutOfRangeException(nameof(name))
         };
+    }
+
+    public static List<SightItem> FilledDot(double centerX, double centerY, double radius)
+    {
+        radius = Math.Max(.001, Math.Abs(radius));
+        return [new(SightItemKind.FilledEllipse, centerX, centerY, radius, radius)];
     }
 
     public static List<SightItem> Part(string name)
@@ -194,7 +210,7 @@ public static partial class SightLogic
         {
             SightItemKind.Line => new SightItem(i.Kind, (i.X1 - centerX) * scale, (i.Y1 - centerY) * scale,
                 (i.X2 - centerX) * scale, (i.Y2 - centerY) * scale),
-            SightItemKind.Ellipse => new SightItem(i.Kind, (i.X1 - centerX) * scale, (i.Y1 - centerY) * scale,
+            SightItemKind.Ellipse or SightItemKind.FilledEllipse => new SightItem(i.Kind, (i.X1 - centerX) * scale, (i.Y1 - centerY) * scale,
                 Math.Abs(i.X2 * scale), Math.Abs(i.Y2 * scale)),
             _ => new SightItem(i.Kind, (i.X1 - centerX) * scale, (i.Y1 - centerY) * scale,
                 i.X2 * scale, i.Y2 * scale)
@@ -203,45 +219,85 @@ public static partial class SightLogic
 
     public static string Compact(string text)
     {
+        var result = CompileMode(text, text.Contains("VECTOR_FILLED_ELLIPSE", StringComparison.Ordinal));
+        if (result.Length == 0) throw new InvalidDataException("Sight has no valid vector commands.");
+        return result;
+    }
+
+    private static string CompileMode(string text, bool opaqueFill)
+    {
         var result = new List<string>();
         foreach (Match m in CommandRegex().Matches(text))
         {
+            var command = m.Groups[1].Value;
             var values = NumberRegex().Matches(m.Groups[2].Value)
-                .Select(n => Number(double.Parse(n.Value, CultureInfo.InvariantCulture)));
-            result.Add($"[{m.Groups[1].Value},{string.Join(",", values)}]");
+                .Select(n => double.Parse(n.Value, CultureInfo.InvariantCulture)).ToArray();
+            if (command == "VECTOR_FILLED_ELLIPSE")
+            {
+                result.Add($"[VECTOR_ELLIPSE,{string.Join(",", values.Select(Number))}]");
+            }
+            else if (command == "VECTOR_ELLIPSE" && opaqueFill)
+            {
+                if (values.Length < 4) continue;
+                const int segments = 48;
+                var points = new List<string>((segments + 1) * 2);
+                for (var index = 0; index <= segments; index++)
+                {
+                    var angle = Math.PI * 2 * index / segments;
+                    points.Add(Number(values[0] + Math.Cos(angle) * Math.Abs(values[2])));
+                    points.Add(Number(values[1] + Math.Sin(angle) * Math.Abs(values[3])));
+                }
+                result.Add($"[VECTOR_LINE,{string.Join(",", points)}]");
+            }
+            else
+            {
+                result.Add($"[{command},{string.Join(",", values.Select(Number))}]");
+            }
         }
-        if (result.Count == 0) throw new InvalidDataException("Sight has no valid vector commands.");
         return string.Join(",", result);
     }
 
-    public static string ReplaceSightFunction(string source, string mode0, string mode1, Color color)
+    public static string ReplaceSightFunction(string source, string mode0, string mode1, Color color,
+        double lineWidth = 2)
     {
+        if (!double.IsFinite(lineWidth) || lineWidth is < .1 or > 50)
+            throw new ArgumentOutOfRangeException(nameof(lineWidth));
+
         const string marker = "function helicopterRocketSightMode";
         var start = source.IndexOf(marker, StringComparison.Ordinal);
         if (start < 0) throw new InvalidDataException($"{marker} was not found.");
 
-        var brace = source.IndexOf('{', start);
-        if (brace < 0) throw new InvalidDataException("The sight function opening brace was not found.");
-        var depth = 0;
-        var end = -1;
-        for (var i = brace; i < source.Length; i++)
+        int FunctionEnd(int functionStart)
         {
-            if (source[i] == '{')
+            var brace = source.IndexOf('{', functionStart);
+            if (brace < 0) throw new InvalidDataException("The sight function opening brace was not found.");
+            var depth = 0;
+            for (var i = brace; i < source.Length; i++)
             {
-                depth++;
+                if (source[i] == '{') depth++;
+                else if (source[i] == '}' && --depth == 0) return i + 1;
             }
-            else if (source[i] == '}' && --depth == 0)
-            {
-                end = i + 1;
-                break;
-            }
+            throw new InvalidDataException("The sight function could not be parsed.");
         }
-        if (end < 0) throw new InvalidDataException("The sight function could not be parsed.");
 
-        var function = $"function helicopterRocketSightMode(sightMode){{if(sightMode==0)return [{Compact(mode0)}];return [{Compact(mode1)}]}}";
-        var output = source[..start] + function + source[end..];
-        var replacement = $"$1Color({color.R}, {color.G}, {color.B}, 255)";
-        output = Regex.Replace(output, @"(color\s*=\s*)Color\(\d+,\s*\d+,\s*\d+,\s*255\)", replacement);
-        return Regex.Replace(output, @"(fillColor\s*=\s*)Color\(\d+,\s*\d+,\s*\d+,\s*255\)", replacement);
+        var end = FunctionEnd(start);
+        const string fillMarker = "function helicopterRocketSightFillMode";
+        var fillStart = source.IndexOf(fillMarker, end, StringComparison.Ordinal);
+        var replacementEnd = fillStart >= 0 ? FunctionEnd(fillStart) : end;
+
+        var opaqueFill = mode0.Contains("VECTOR_FILLED_ELLIPSE", StringComparison.Ordinal) ||
+            mode1.Contains("VECTOR_FILLED_ELLIPSE", StringComparison.Ordinal);
+        var compiled0 = CompileMode(mode0, opaqueFill);
+        var compiled1 = CompileMode(mode1, opaqueFill);
+        var function =
+            $"function helicopterRocketSightMode(sightMode){{if(sightMode==0)return [{compiled0}];return [{compiled1}]}}";
+        var output = source[..start] + function + source[replacementEnd..];
+        var lineColor = $"$1Color({color.R}, {color.G}, {color.B}, 255)";
+        var fillColor = $"$1Color({color.R}, {color.G}, {color.B}, {(opaqueFill ? 255 : 0)})";
+        output = Regex.Replace(output, @"(color\s*=\s*)Color\(\d+,\s*\d+,\s*\d+,\s*\d+\)", lineColor);
+        output = Regex.Replace(output, @"(fillColor\s*=\s*)Color\(\d+,\s*\d+,\s*\d+,\s*\d+\)", fillColor);
+        return Regex.Replace(output,
+            @"(rocketSightLineWidth\s*=\s*)[-+]?(?:\d+(?:\.\d*)?|\.\d+)",
+            match => match.Groups[1].Value + Number(lineWidth));
     }
 }

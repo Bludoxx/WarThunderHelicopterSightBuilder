@@ -1391,6 +1391,18 @@ let lockSightComponent = function(colorWatch, width, height, posX, posY) {
   return lockSight(color, width, height, posX, posY)
 }
 
+function correctRocketSightAspect(commands, width, height) {
+  let result = []
+  let xScale = height / max(width, 0.001)
+  foreach (command in commands) {
+    let corrected = clone command
+    for (local index = 1; index < corrected.len(); index += 2)
+      corrected[index] = corrected[index] * xScale
+    result.append(corrected)
+  }
+  return result
+}
+
 function helicopterRocketSightMode(sightMode) {
 
   if (sightMode == 0) {
@@ -1404,6 +1416,7 @@ function helicopterRocketSightMode(sightMode) {
   ]
 }
 
+let rocketSightLineWidth = 2.0
 let helicopterRocketAim = @(width, height, color, style = HudStyle.styleLineForeground) function() {
 
   let lines = helicopterRocketSightMode(RocketSightMode.get())
@@ -1415,12 +1428,13 @@ let helicopterRocketAim = @(width, height, color, style = HudStyle.styleLineFore
     size = [width, height]
     color = Color(255, 255, 255, 255)
     fillColor = Color(255, 255, 255, 255)
+    lineWidth = hdpx(rocketSightLineWidth)
     watch = [RocketAimX, RocketAimY, RocketAimVisible, RocketSightMode]
     opacity = RocketAimVisible.get() ? 1 : 0
     transform = {
       translate = [RocketAimX.get(), RocketAimY.get()]
     }
-    commands = lines
+    commands = correctRocketSightAspect(lines, width, height)
   })
 }
 

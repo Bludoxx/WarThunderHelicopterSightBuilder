@@ -8,7 +8,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>HeliSightBuilder</AssemblyName>
     <RootNamespace>HeliSightBuilder.Native</RootNamespace>
+    <Version>1.5.0</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\HeliSightBuilder.ico</ApplicationIcon>
     <PublishSingleFile>false</PublishSingleFile>
     <PublishTrimmed>false</PublishTrimmed>
     <DebugType>embedded</DebugType>
@@ -17,16 +19,29 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Content Include="Assets\HeliSightBuilder.png" />
+    <EmbeddedResource Include="Assets\HeliSightBuilder.ico"
+                      LogicalName="HeliSightBuilder.Assets.HeliSightBuilder.ico" />
     <PackageReference Include="ZstdSharp.Port" Version="0.8.6" />
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="Resources\source\**\*">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Resources\template\**\*">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
+    <EmbeddedResource Include="Resources\source\gameuiskin\ccip_rocket_sight.svg"
+                      LogicalName="HeliSightBuilder.Resources.source.gameuiskin.ccip_rocket_sight.svg" />
+    <EmbeddedResource Include="Resources\source\gameuiskin\rocket_sight.svg"
+                      LogicalName="HeliSightBuilder.Resources.source.gameuiskin.rocket_sight.svg" />
+    <EmbeddedResource Include="Resources\source\reactivegui\airHudElems.nut"
+                      LogicalName="HeliSightBuilder.Resources.source.reactivegui.airHudElems.nut" />
+    <EmbeddedResource Include="Resources\source\ui\gameuiskin\ccip_rocket_sight.svg"
+                      LogicalName="HeliSightBuilder.Resources.source.ui.gameuiskin.ccip_rocket_sight.svg" />
+    <EmbeddedResource Include="Resources\source\ui\gameuiskin\rocket_sight.svg"
+                      LogicalName="HeliSightBuilder.Resources.source.ui.gameuiskin.rocket_sight.svg" />
+    <EmbeddedResource Include="Resources\template\pkg_user.rq2"
+                      LogicalName="HeliSightBuilder.Resources.template.pkg_user.rq2" />
+    <EmbeddedResource Include="Resources\template\pkg_user.ver"
+                      LogicalName="HeliSightBuilder.Resources.template.pkg_user.ver" />
+    <EmbeddedResource Include="Resources\template\pkg_user\base.vromfs.bin"
+                      LogicalName="HeliSightBuilder.Resources.template.pkg_user.base.vromfs.bin" />
   </ItemGroup>
 
 </Project>

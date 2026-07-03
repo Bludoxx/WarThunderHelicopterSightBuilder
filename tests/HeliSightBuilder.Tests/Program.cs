@@ -20,6 +20,10 @@ Run("Preset generation", () =>
 {
     foreach (var name in new[] { "Dot", "Circle", "Cross", "Box", "T Sight" })
         Require(SightLogic.CommandRegex().Matches(SightLogic.Commands(SightLogic.Preset(name, 4.2, 1))).Count > 0, name);
+    Require(SightLogic.Preset("Dot", 4.2, 1).Single().Kind == SightItemKind.FilledEllipse,
+        "Dot preset should use one true filled ellipse.");
+    Require(SightLogic.Preset("Circle", 4.2, 1).Single().Kind == SightItemKind.Ellipse,
+        "Circle preset should remain an outlined ellipse.");
 });
 
 Run("Tiny and extreme geometry", () =>
@@ -30,6 +34,47 @@ Run("Tiny and extreme geometry", () =>
     ], 1);
     Require(commands.Contains("999999", StringComparison.Ordinal), "Extreme coordinate was clipped.");
     Require(SightLogic.CommandRegex().Matches(commands).Count == 2, "Tiny geometry was lost.");
+});
+
+Run("Invalid geometry rejection", () =>
+{
+    RequireThrows(() => SightLogic.Commands([
+        new(SightItemKind.Line, double.PositiveInfinity, 0, 1, 1)
+    ]));
+    RequireThrows(() => SightLogic.Commands([
+        new(SightItemKind.Line, EditorStateRules.MaxCoordinate + 1, 0, 1, 1)
+    ]));
+    RequireThrows(() => SightLogic.Commands([
+        new(SightItemKind.Line, EditorStateRules.MaxCoordinate, 0, 1, 1)
+    ], 2));
+});
+
+Run("Corrupted editor state recovery", () =>
+{
+    var corrupted = new AppState("Custom", 4.2, 1, 7003, "White", 0, 0,
+        [new(SightItemKind.Line, -9_000_000_000, 1, 10_000_000_000, 2)],
+        12, root, "Line", "Brackets", 0, true, 0, 0);
+    var recovered = EditorStateRules.Sanitize(corrupted, out var changed);
+    Require(changed, "Corrupted state was not detected.");
+    Require(recovered.Zoom == EditorStateRules.DefaultZoom, "Unsafe zoom was retained.");
+    Require(recovered.Grid == EditorStateRules.DefaultGrid, "Unsafe grid was retained.");
+    Require(recovered.Nudge == EditorStateRules.DefaultNudge, "Unsafe nudge was retained.");
+    Require(Math.Abs(recovered.Scale - 7003d / 70) < .001,
+        "Legacy 7000% scale was not migrated.");
+    Require(recovered.Items.Count == 1 && EditorStateRules.IsValidItem(recovered.Items[0]),
+        "Corrupted geometry was retained.");
+
+    var currentLargeScale = corrupted with
+    {
+        Scale = 7000,
+        ScaleCalibrationVersion = 1,
+        Items = [new(SightItemKind.Line, 0, 0, 1, 1)]
+    };
+    var current = EditorStateRules.Sanitize(currentLargeScale, out _);
+    Require(Math.Abs(current.Scale - 7) < .001,
+        "Existing visual size was not converted to normalized relative scale.");
+    Require(Math.Abs(EditorStateRules.OutputScale(100) - 1) < .001,
+        "100% no longer maps to the calibrated in-game scale.");
 });
 
 Run("Large command stress", () =>
@@ -71,9 +116,95 @@ Run("HUD replacement and colors", () =>
 {
     var air = File.ReadAllText(Path.Combine(source, "reactivegui", "airHudElems.nut"));
     var command = SightLogic.Commands(SightLogic.Preset("Dot", 4.2, 1));
-    var result = SightLogic.ReplaceSightFunction(air, command, command, Color.Cyan);
+    var result = SightLogic.ReplaceSightFunction(air, command, command, Color.Cyan, 3.5);
     Require(result.Contains("Color(0, 255, 255, 255)", StringComparison.Ordinal), "Color was not replaced.");
+    Require(result.Contains("fillColor = Color(0, 255, 255, 255)", StringComparison.Ordinal),
+        "True dot fill was not enabled.");
+    Require(result.Contains("correctRocketSightAspect(lines, width, height)", StringComparison.Ordinal),
+        "Runtime HUD aspect correction is missing.");
+    Require(result.Contains("rocketSightLineWidth = 3.5", StringComparison.Ordinal) &&
+        result.Contains("lineWidth = hdpx(rocketSightLineWidth)", StringComparison.Ordinal),
+        "Selected line width was not compiled into the HUD.");
     Require(result.Contains("function helicopterRocketSightMode", StringComparison.Ordinal), "Sight function missing.");
+    Require(!result.Contains("function helicopterRocketSightFillMode", StringComparison.Ordinal),
+        "Unsupported second HUD command layer was generated.");
+    Require(!result.Contains("VECTOR_FILLED_ELLIPSE", StringComparison.Ordinal),
+        "Editor-only filled command leaked into game HUD code.");
+    var rocketAim = result[result.IndexOf("let helicopterRocketAim", StringComparison.Ordinal)..
+        result.IndexOf("let turretAnglesAspect", StringComparison.Ordinal)];
+    Require(rocketAim.Contains("return style.__merge({", StringComparison.Ordinal) &&
+        !rocketAim.Contains("children =", StringComparison.Ordinal),
+        "Known-working single-canvas HUD structure changed.");
+
+    var outlineCircle = SightLogic.Commands([new(SightItemKind.Ellipse, 0, 0, 10, 10)]);
+    var outlineResult = SightLogic.ReplaceSightFunction(air, outlineCircle, outlineCircle, Color.White);
+    Require(outlineResult.Contains("fillColor = Color(255, 255, 255, 0)", StringComparison.Ordinal),
+        "Circle-only sight was not kept transparent.");
+
+    var mixed = SightLogic.Commands([
+        new(SightItemKind.FilledEllipse, 0, 0, 2, 2),
+        new(SightItemKind.Ellipse, 0, 0, 10, 10)
+    ]);
+    var mixedResult = SightLogic.ReplaceSightFunction(air, mixed, mixed, Color.White);
+    Require(mixedResult.Contains("[VECTOR_ELLIPSE,0,0,2,2]", StringComparison.Ordinal) &&
+        mixedResult.Contains("[VECTOR_LINE,10,0", StringComparison.Ordinal),
+        "Mixed dot/circle sight was not compiled into filled-dot and outline-loop commands.");
+});
+
+Run("Install and restore workflow", () =>
+{
+    var game = Path.Combine(root, "War Thunder");
+    var content = Path.Combine(game, "content");
+    Directory.CreateDirectory(Path.Combine(game, "win64"));
+    Directory.CreateDirectory(Path.Combine(content, "pkg_user"));
+    File.WriteAllText(Path.Combine(game, "win64", "aces.exe"), "");
+    File.WriteAllText(Path.Combine(content, "pkg_user", "base.vromfs.bin"), "previous package");
+    File.WriteAllText(Path.Combine(content, "pkg_user.rq2"), "previous rq2");
+    File.WriteAllText(Path.Combine(content, "pkg_user.ver"), "previous ver");
+
+    var built = Path.Combine(root, "built-install");
+    Directory.CreateDirectory(Path.Combine(built, "pkg_user"));
+    File.WriteAllText(Path.Combine(built, "pkg_user", "base.vromfs.bin"), "new package");
+    File.WriteAllText(Path.Combine(built, "pkg_user.rq2"), "new rq2");
+    File.WriteAllText(Path.Combine(built, "pkg_user.ver"), "new ver");
+
+    GameInstallService.Install(built, content);
+    Require(File.ReadAllText(Path.Combine(content, "pkg_user", "base.vromfs.bin")) == "new package",
+        "Install did not replace the package.");
+    Require(GameInstallService.Restore(content), "Tracked installation was not restored.");
+    Require(File.ReadAllText(Path.Combine(content, "pkg_user", "base.vromfs.bin")) == "previous package",
+        "Previous package was not restored.");
+    Require(File.ReadAllText(Path.Combine(content, "pkg_user.rq2")) == "previous rq2",
+        "Previous rq2 file was not restored.");
+});
+
+Run("Embedded release resources", () =>
+{
+    var extracted = Path.Combine(root, "embedded-resources");
+    EmbeddedResources.ExtractTo(extracted);
+    Require(File.Exists(Path.Combine(extracted, "source", "reactivegui", "airHudElems.nut")),
+        "Embedded HUD source was not extracted.");
+    Require(File.Exists(Path.Combine(extracted, "template", "pkg_user", "base.vromfs.bin")),
+        "Embedded package template was not extracted.");
+    var sourceHud = Path.Combine(extracted, "source", "reactivegui", "airHudElems.nut");
+    var dot = SightLogic.Commands(SightLogic.Preset("Dot", 4.2, 1));
+    File.WriteAllText(sourceHud,
+        SightLogic.ReplaceSightFunction(File.ReadAllText(sourceHud), dot, dot, Color.White, 4.25));
+    var embeddedBuild = Path.Combine(root, "embedded-build.bin");
+    VromfsPackage.Build(
+        Path.Combine(extracted, "template", "pkg_user", "base.vromfs.bin"),
+        Path.Combine(extracted, "source"),
+        embeddedBuild);
+    var packagedHud = Encoding.UTF8.GetString(
+        ReadPackageEntry(embeddedBuild, "reactivegui/airhudelems.nut"));
+    Require(packagedHud.Contains("correctRocketSightAspect(lines, width, height)",
+        StringComparison.Ordinal), "Aspect correction was lost during VROMFS packaging.");
+    Require(packagedHud.Contains("fillColor = Color(255, 255, 255, 255)",
+        StringComparison.Ordinal), "Opaque dot fill was lost during VROMFS packaging.");
+    Require(packagedHud.Contains("rocketSightLineWidth = 4.25", StringComparison.Ordinal),
+        "Selected line width was lost during VROMFS packaging.");
+    Require(!packagedHud.Contains("helicopterRocketSightFillMode", StringComparison.Ordinal),
+        "Unsupported second HUD layer reached the VROMFS package.");
 });
 
 Run("Baseline VROMFS build", () =>
@@ -144,6 +275,37 @@ static void RequireThrows(Action action)
 
 static (int Packing, int InnerSize, int EntryCount) ReadPackage(string path)
 {
+    var (packing, unpacked, inner) = ReadInnerPackage(path);
+    Require(inner.Length == unpacked, "Unpacked size mismatch.");
+    var names = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(inner.AsSpan(4, 4)));
+    var info = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(inner.AsSpan(20, 4)));
+    Require(names == info, "Package tables disagree.");
+    return (packing, inner.Length, names);
+}
+
+static byte[] ReadPackageEntry(string path, string requestedName)
+{
+    var (_, _, inner) = ReadInnerPackage(path);
+    var namesOffset = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(inner.AsSpan(0, 4)));
+    var namesCount = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(inner.AsSpan(4, 4)));
+    var infoOffset = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(inner.AsSpan(16, 4)));
+    for (var index = 0; index < namesCount; index++)
+    {
+        var nameOffset = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+            inner.AsSpan(namesOffset + index * 8, 4)));
+        var nameEnd = Array.IndexOf(inner, (byte)0, nameOffset);
+        var name = Encoding.UTF8.GetString(inner, nameOffset, nameEnd - nameOffset);
+        if (!name.Equals(requestedName, StringComparison.OrdinalIgnoreCase)) continue;
+        var table = infoOffset + index * 16;
+        var offset = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(inner.AsSpan(table, 4)));
+        var size = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(inner.AsSpan(table + 4, 4)));
+        return inner.AsSpan(offset, size).ToArray();
+    }
+    throw new InvalidOperationException($"Package entry not found: {requestedName}");
+}
+
+static (int Packing, int UnpackedSize, byte[] Inner) ReadInnerPackage(string path)
+{
     var raw = File.ReadAllBytes(path);
     Require(Encoding.ASCII.GetString(raw, 0, 4) == "VRFs", "Bad package magic.");
     var unpacked = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(raw.AsSpan(8, 4)));
@@ -152,13 +314,8 @@ static (int Packing, int InnerSize, int EntryCount) ReadPackage(string path)
     var packedSize = checked((int)(packRaw & 0x03FFFFFF));
     var packed = raw.AsSpan(16, packedSize).ToArray();
     Xor(packed);
-    byte[] inner;
-    using (var decompressor = new Decompressor()) inner = decompressor.Unwrap(packed).ToArray();
-    Require(inner.Length == unpacked, "Unpacked size mismatch.");
-    var names = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(inner.AsSpan(4, 4)));
-    var info = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(inner.AsSpan(20, 4)));
-    Require(names == info, "Package tables disagree.");
-    return (packing, inner.Length, names);
+    using var decompressor = new Decompressor();
+    return (packing, unpacked, decompressor.Unwrap(packed).ToArray());
 }
 
 static void Xor(byte[] bytes)

@@ -10,7 +10,7 @@ dotnet publish $project `
   --self-contained true `
   -p:PublishSingleFile=true `
   -p:IncludeNativeLibrariesForSelfExtract=true `
-  -p:IncludeAllContentForSelfExtract=true `
+  -p:IncludeAllContentForSelfExtract=false `
   -p:EnableCompressionInSingleFile=false `
   -p:PublishTrimmed=false `
   -p:PublishReadyToRun=false `

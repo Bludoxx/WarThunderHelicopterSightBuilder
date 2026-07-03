@@ -1,27 +1,62 @@
 # War Thunder Helicopter Sight Builder
 
-A Windows editor for creating custom helicopter rocket CCIP reticles and
-building the corresponding War Thunder `pkg_user` content package.
+A Windows editor for making custom helicopter rocket CCIP sights and installing
+them as a War Thunder `pkg_user` content package.
 
-This project was created by [Bludoxx](https://www.youtube.com/@Bludoxx) after
-players asked for an easier way to customize the helicopter sight shown in the
-[original Reddit post](https://www.reddit.com/r/Warthunder/comments/1ubt3zu/you_can_change_the_helicopter_rocket_sight/).
-Consider subscribing to the YouTube channel if the tool is useful to you.
+I made this after players asked for a practical way to build their own sights
+following my [original Reddit post](https://www.reddit.com/r/Warthunder/comments/1ubt3zu/you_can_change_the_helicopter_rocket_sight/).
+Updates and demonstrations are posted on
+[my YouTube channel](https://www.youtube.com/@Bludoxx).
+
+![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4)
+![Release](https://img.shields.io/badge/release-v1.5.0-2E7D32)
+![License](https://img.shields.io/badge/license-CC%20BY--NC--SA%204.0-555555)
 
 ## Download
 
-1. Open the latest GitHub Release.
-2. Download `HeliSightBuilder.exe`.
-3. Run `HeliSightBuilder.exe`.
-4. Choose an output folder and select **Build install files**.
+Open the [latest release](https://github.com/Bludoxx/WarThunderHelicopterSightBuilder/releases/latest)
+and download `HeliSightBuilder.exe`.
 
-The release is a self-contained Windows application. Its file size includes
-the application, the Microsoft .NET desktop runtime, and the sight-package
-resources.
+The download is a self-contained Windows application. It does not require a
+separate .NET installation. The large file size comes from the included
+Microsoft .NET desktop runtime and package-building resources.
 
-## Install a generated sight
+Current v1.5.0 SHA-256:
 
-The output contains:
+```text
+A4DC47BFA74206F602AD8DA0C54712B6031A32973FDE879D8A140552A9E7B409
+```
+
+To verify it in PowerShell:
+
+```powershell
+Get-FileHash .\HeliSightBuilder.exe -Algorithm SHA256
+```
+
+## Quick start
+
+1. Run `HeliSightBuilder.exe`.
+2. Pick a preset or select **Custom** and draw a sight.
+3. Adjust its relative size, line width, color, and CCIP origin.
+4. Use **Full Screen** to check its predicted in-game size.
+5. Select **Install Sight**.
+6. Restart War Thunder if it was already running.
+
+The program normally finds a Steam installation automatically. If it does not,
+use **Find / Choose** and select War Thunder's `content` folder.
+
+## Installing and restoring
+
+- **Install Sight** builds the current design and installs it into the selected
+  War Thunder installation.
+- **Restore Original** removes the installed override and restores the package
+  that existed before the builder replaced it.
+- **Build install files** creates a portable package without touching the game
+  directory.
+
+An existing `pkg_user` package is backed up before installation.
+
+Manual builds contain:
 
 ```text
 pkg_user/
@@ -30,30 +65,58 @@ pkg_user.rq2
 pkg_user.ver
 ```
 
-Place those three items inside War Thunder's `content` directory. Removing
-them restores the normal game sight.
+Place all three items inside War Thunder's `content` directory. Remove those
+same items to return to the normal sight when no earlier `pkg_user` package
+needs to be restored.
 
-## Editor controls
+## Editing a sight
 
-- **Select** selects an existing custom shape for precise editing.
+### Drawing and navigation
+
+- **Select** chooses existing shapes. Drag over empty canvas space for a box
+  selection, or use Ctrl-click and Shift-click to change a multi-selection.
 - **Pan** moves the canvas with the left mouse button.
-- **Line**, **Circle**, **Box**, and **Dot** draw custom geometry.
-- The middle mouse button pans from any tool.
+- The right or middle mouse button pans regardless of the active drawing tool.
 - The mouse wheel zooms around the cursor.
-- **Custom scale %** changes the size of the complete design.
-- The yellow CCIP marker chooses which point becomes the in-game aiming center.
-- Undo, redo, grid snapping, numeric editing, SVG import, colors, and autosave
-  are included.
+- **Line**, **Circle**, **Box**, and **Dot** create new geometry.
+- **Snap to grid** displays the grid and locks new points to its intersections.
+- The nudge controls move every selected shape by the chosen nudge distance.
+- Undo, redo, delete, numeric coordinate editing, and SVG import are available.
 
-Autosave data is stored in:
+### Size and appearance
+
+- **Design scale %** uses a normalized scale. A design at `100%` occupies the
+  same overall envelope regardless of its original or imported coordinates.
+- **In-game size** fits the complete design to Small, Medium, Large, or Extra
+  Large. Choose Custom for direct percentage control.
+- **Line width** changes stroke thickness in the editor, fullscreen preview,
+  saved design, and generated game package.
+- **Sight color** sets the generated HUD color.
+- **Full Screen** previews the predicted screen coverage at 720p, 1080p, 1440p,
+  or 4K using the standard helicopter HUD canvas scale.
+- The yellow CCIP marker sets the point that will be placed on the game's
+  calculated rocket impact position.
+
+Sight size is unrestricted. Build and Install do not reject a design because
+of its dimensions.
+
+### Saved designs
+
+Named designs can be saved, loaded, and deleted inside the program. Autosave
+also preserves current work.
 
 ```text
-%LOCALAPPDATA%\HeliSightBuilder\autosave-native.json
+Saved designs: %LOCALAPPDATA%\HeliSightBuilder\designs
+Autosave:      %LOCALAPPDATA%\HeliSightBuilder\autosave-native.json
 ```
 
-## Supported SVG elements
+Older saves are migrated to the normalized size system without intentionally
+changing their rendered size. Invalid or non-finite coordinates are rejected
+before they can enter the package.
 
-The importer accepts line-oriented artwork using:
+## SVG import
+
+The importer supports line-oriented SVG artwork made from:
 
 - `line`
 - `rect`
@@ -63,33 +126,40 @@ The importer accepts line-oriented artwork using:
 - `polygon`
 - simple `M`, `L`, `H`, `V`, and `Z` path commands
 
-Complex curves, text, masks, effects, and transforms should be converted to
-simple line art before importing.
+Convert curves, text, masks, effects, and transforms to simple line art before
+importing.
 
-## Technical overview
+## How the package works
 
-The editor writes `VECTOR_LINE`, `VECTOR_ELLIPSE`, and
-`VECTOR_RECTANGLE` commands into the helicopter rocket-sight function in
-`reactivegui/airHudElems.nut`.
+War Thunder calculates the rocket CCIP position. This project only replaces the
+HUD resources used to draw the symbol at that position.
 
-The selected CCIP origin is translated to the fixed position expected by each
-HUD mode. The package writer then rebuilds the Zstandard-compressed VROMFS
-container. If an edited entry is larger than its original slot, the writer
-appends it and updates the package table instead of enforcing an artificial
-byte limit.
+The editor converts the design to `VECTOR_LINE`, `VECTOR_ELLIPSE`, and
+`VECTOR_RECTANGLE` commands inside `reactivegui/airHudElems.nut`. Filled dots
+use a dedicated filled-ellipse editor command and are converted to a form the
+game's working vector canvas accepts.
 
-The editor works locally and writes only to the output folder selected by the
-user, apart from its autosave file.
+The generated HUD applies horizontal aspect correction from the actual canvas
+width and height. This compensates for the game's non-square rocket-sight
+canvas so artwork does not become narrower in game.
+
+The package writer rebuilds the Zstandard-compressed VROMFS container and
+updates its entry table. Edited resources are not restricted to the original
+entry size.
 
 ## Source layout
 
-- `src/HeliSightBuilder/MainForm.cs` - Windows UI, editor state, and canvas.
-- `src/HeliSightBuilder/SightLogic.cs` - vector generation and SVG importing.
-- `src/HeliSightBuilder/VromfsPackage.cs` - VROMFS reading and rebuilding.
-- `src/HeliSightBuilder/Resources/` - editable HUD resources and package template.
-- `tests/HeliSightBuilder.Tests/` - stress and package-compatibility checks.
-- `build_release.ps1` - reproducible single-file release build.
-- `run_tests.ps1` - automated quality-control suite.
+```text
+src/HeliSightBuilder/
+  MainForm.cs              Windows UI, canvas, preview, and editor state
+  SightLogic.cs            Vector generation and SVG import
+  VromfsPackage.cs         VROMFS reading and rebuilding
+  GameInstallService.cs    Detection, backup, install, and restore
+  EditorStateRules.cs      Numeric and save-state validation
+  Resources/               HUD resources and package template
+tests/HeliSightBuilder.Tests/
+  Program.cs               Package, stress, migration, and workflow tests
+```
 
 ## Build from source
 
@@ -98,25 +168,34 @@ Requirements:
 - Windows 10 or 11
 - .NET 8 SDK or newer
 
-From PowerShell:
+Run:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\run_tests.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build_release.ps1
 ```
 
-The release executable is written to:
+The self-contained executable is written to:
 
 ```text
 release\HeliSightBuilder.exe
 ```
 
-The release uses Microsoft's standard self-contained single-file deployment.
-Executable hashes may change when the .NET SDK or runtime is updated.
+The hash can change when the source, .NET SDK, or bundled runtime changes.
+
+## Project status
+
+The builder is an independent community project and is not affiliated with or
+endorsed by Gaijin Entertainment. Installation of game modifications remains
+the player's responsibility.
+
+For release history, see [CHANGELOG.md](CHANGELOG.md). Bug reports should
+include the builder version, the steps that caused the problem, and a screenshot
+or saved design when possible.
 
 ## License
 
 Original project code and documentation are available under
-[CC BY-NC-SA 4.0](LICENSE). Third-party components and third-party material
-remain under their respective terms; see [NOTICE.md](NOTICE.md) and
+[CC BY-NC-SA 4.0](LICENSE). Third-party components and material remain under
+their own terms; see [NOTICE.md](NOTICE.md) and
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
