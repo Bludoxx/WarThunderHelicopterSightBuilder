@@ -1,5 +1,36 @@
 # Changelog
 
+## v1.5.1 - 2026-07-03
+
+### Improved
+
+- Rebuilt SVG path import around complete line-art geometry instead of reading
+  only straight path commands.
+- Added cubic and quadratic curves, smooth curves, elliptical arcs, relative
+  coordinates, repeated path data, and closed subpaths.
+- Added nested SVG matrix, translate, scale, rotate, and skew transforms.
+- Curves are flattened adaptively so detailed converter output stays smooth
+  without using a fixed and unnecessarily huge number of segments.
+- Heavy imports are simplified below visible pixel detail and compiled into
+  native polylines capped at the official HUD's seven-point maximum.
+- Added **Mirror Selected (CCIP)** to duplicate selected geometry across the
+  vertical axis through the current CCIP origin.
+- Detailed imports retain their visible contours while the editor uses the
+  dense-art rendering and autosave optimizations introduced in v1.5.0.
+
+### Tested formats
+
+- Photoshop SVG conversion.
+- Potrace-style SVGs using relative curves and an inverted group transform.
+- Converter output using a separate translation on every path.
+- Mixed straight, cubic, quadratic, smooth, arc, and transformed paths.
+
+`HeliSightBuilder.exe` SHA-256:
+
+```text
+E572A2ED9E474EF9384E19F7800CAA71C6255AC16CCADFF3C4D344ED6F470F1D
+```
+
 ## v1.5.0 - 2026-07-03
 
 This release focuses on making the editor's preview and sizing match what War

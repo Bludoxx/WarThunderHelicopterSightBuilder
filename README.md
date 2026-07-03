@@ -9,7 +9,7 @@ Updates and demonstrations are posted on
 [my YouTube channel](https://www.youtube.com/@Bludoxx).
 
 ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4)
-![Release](https://img.shields.io/badge/release-v1.5.0-2E7D32)
+![Release](https://img.shields.io/badge/release-v1.5.1-2E7D32)
 ![License](https://img.shields.io/badge/license-CC%20BY--NC--SA%204.0-555555)
 
 ## Download
@@ -21,13 +21,9 @@ The download is a self-contained Windows application. It does not require a
 separate .NET installation. The large file size comes from the included
 Microsoft .NET desktop runtime and package-building resources.
 
-Current v1.5.0 SHA-256:
+The SHA-256 for each build is listed on its GitHub release page.
 
-```text
-A4DC47BFA74206F602AD8DA0C54712B6031A32973FDE879D8A140552A9E7B409
-```
-
-To verify it in PowerShell:
+To verify a download in PowerShell:
 
 ```powershell
 Get-FileHash .\HeliSightBuilder.exe -Algorithm SHA256
@@ -81,6 +77,8 @@ needs to be restored.
 - **Line**, **Circle**, **Box**, and **Dot** create new geometry.
 - **Snap to grid** displays the grid and locks new points to its intersections.
 - The nudge controls move every selected shape by the chosen nudge distance.
+- **Mirror Selected (CCIP)** duplicates the selected shapes across the vertical
+  axis through the current CCIP origin and selects the new mirrored copies.
 - Undo, redo, delete, numeric coordinate editing, and SVG import are available.
 
 ### Size and appearance
@@ -124,10 +122,13 @@ The importer supports line-oriented SVG artwork made from:
 - `ellipse`
 - `polyline`
 - `polygon`
-- simple `M`, `L`, `H`, `V`, and `Z` path commands
+- straight, cubic, quadratic, smooth, and elliptical-arc path commands:
+  `M`, `L`, `H`, `V`, `C`, `S`, `Q`, `T`, `A`, and `Z`
+- absolute and relative path coordinates
+- nested `matrix`, `translate`, `scale`, `rotate`, `skewX`, and `skewY`
+  transforms
 
-Convert curves, text, masks, effects, and transforms to simple line art before
-importing.
+Text, masks, and effects should still be converted to paths before importing.
 
 ## How the package works
 
@@ -146,6 +147,12 @@ canvas so artwork does not become narrower in game.
 The package writer rebuilds the Zstandard-compressed VROMFS container and
 updates its entry table. Edited resources are not restricted to the original
 entry size.
+
+Heavy SVG imports are simplified only below visible pixel detail, then
+connected segments are packaged in polylines of no more than seven points. That
+matches the largest `VECTOR_LINE` form used by the official HUD resources and
+reduces third-person renderer load without using unsupported oversized commands.
+
 
 ## Source layout
 

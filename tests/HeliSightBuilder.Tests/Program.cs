@@ -87,6 +87,21 @@ Run("Large command stress", () =>
     Require(timer.Elapsed < TimeSpan.FromSeconds(10), $"Generation took {timer.Elapsed}.");
 });
 
+Run("Game line command compatibility", () =>
+{
+    var connected = Enumerable.Range(0, 20)
+        .Select(index => new SightItem(SightItemKind.Line, index, 0, index + 1, 0));
+    var compact = SightLogic.Compact(SightLogic.Commands(connected));
+    var commands = SightLogic.CommandRegex().Matches(compact);
+    Require(commands.Count == 4, $"Expected 4 bounded native polylines, found {commands.Count}.");
+    Require(commands.All(match =>
+        System.Text.RegularExpressions.Regex.Matches(match.Groups[2].Value,
+            @"[-+]?(?:\d+\.\d+|\d+|\.\d+)(?:[eE][-+]?\d+)?").Count is >= 4 and <= 14),
+        "A generated polyline exceeds the largest VECTOR_LINE used by the official HUD.");
+    Require(compact.Contains(",20,0]", StringComparison.Ordinal),
+        "Bounded polyline compilation lost the final point.");
+});
+
 Run("SVG import stress", () =>
 {
     var svg = Path.Combine(root, "stress.svg");
@@ -103,6 +118,28 @@ Run("SVG path commands", () =>
     File.WriteAllText(svg, "<svg><path d=\"M 0 0 L 10 0 v 10 h -10 z\"/></svg>");
     var imported = SightLogic.ImportSvg(svg);
     Require(imported.Count == 4, $"Expected 4 path lines, found {imported.Count}.");
+});
+
+Run("SVG curves arcs and transforms", () =>
+{
+    var svg = Path.Combine(root, "curves.svg");
+    File.WriteAllText(svg, """
+        <svg viewBox="0 0 200 200">
+          <g transform="translate(100 80) scale(.5 -1)">
+            <path transform="rotate(15)" d="M 0 0
+              C 20 -30 40 30 60 0 S 100 -30 120 0
+              Q 100 40 80 20 T 40 20
+              A 20 10 30 0 1 0 0 Z"/>
+          </g>
+        </svg>
+        """);
+    var imported = SightLogic.ImportSvg(svg);
+    Require(imported.Count > 30, $"Curves were not flattened in enough detail ({imported.Count}).");
+    Require(imported.All(EditorStateRules.IsValidItem), "Transformed curve produced invalid geometry.");
+    var width = imported.Max(item => item.Bounds.Right) - imported.Min(item => item.Bounds.Left);
+    var height = imported.Max(item => item.Bounds.Bottom) - imported.Min(item => item.Bounds.Top);
+    Require(Math.Abs(Math.Max(width, height) - 32) < .01,
+        "Transformed SVG was not normalized to the editor canvas.");
 });
 
 Run("Malformed SVG rejection", () =>

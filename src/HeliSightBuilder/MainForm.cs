@@ -286,6 +286,8 @@ public sealed class MainForm : Form
             FindButton(controlPanel, "Save") is not null &&
             FindButton(controlPanel, "Load") is not null,
             "size awareness and saved-design controls");
+        Require(FindButton(controlPanel, "Mirror Selected (CCIP)") is not null,
+            "mirror selected button discovery");
         Show();
         Application.DoEvents();
         rightButton!.PerformClick();
@@ -357,6 +359,20 @@ public sealed class MainForm : Form
             "group nudge");
         DeleteSelected();
         Require(items.Count == 0 && selectedIndices.Count == 0, "group delete");
+        originX.Value = 2;
+        items.Add(new(SightItemKind.Line, 0, 0, 1, 1));
+        items.Add(new(SightItemKind.Ellipse, 3, 0, 1, 2));
+        items.Add(new(SightItemKind.Rectangle, -1, -1, 2, 2));
+        selectedIndices.UnionWith([0, 1, 2]);
+        selected = 2;
+        MirrorSelected();
+        Require(items.Count == 6 && ValidSelection().SequenceEqual([3, 4, 5]),
+            "mirrored copies become selected");
+        Require(items[3].X1 == 4 && items[3].X2 == 3 &&
+            items[4].X1 == 1 && items[5].X1 == 3,
+            "selected geometry mirrors across CCIP axis");
+        items.Clear();
+        selectedIndices.Clear();
         items.Add(new(SightItemKind.Line, -1, 0, 1, 0));
         selected = 0;
         selectedIndices.Add(0);
@@ -530,6 +546,7 @@ public sealed class MainForm : Form
         controls.Controls.Add(Row(valueCLabel, valueC, valueDLabel, valueD));
         controls.Controls.Add(Button("Apply Values", (_, _) => ApplyValues()));
         controls.Controls.Add(NudgePad());
+        controls.Controls.Add(Button("Mirror Selected (CCIP)", (_, _) => MirrorSelected()));
         controls.Controls.Add(Button("Delete Selected", (_, _) => DeleteSelected()));
         controls.Controls.Add(Button("Clear Custom Sight", (_, _) => { items.Clear(); selectedIndices.Clear(); selected = -1; shape.SelectedItem = "Custom"; Changed(); }));
         controls.Controls.Add(Section("Saved designs"));
@@ -1157,6 +1174,37 @@ public sealed class MainForm : Form
                 ? item with { X1 = item.X1 + dx, Y1 = item.Y1 + dy, X2 = item.X2 + dx, Y2 = item.Y2 + dy }
                 : item with { X1 = item.X1 + dx, Y1 = item.Y1 + dy };
         }
+        Changed();
+    }
+
+    private void MirrorSelected()
+    {
+        var targets = ValidSelection();
+        if (targets.Count == 0) return;
+        var axis = (double)originX.Value;
+        var first = items.Count;
+        foreach (var index in targets)
+        {
+            var item = items[index];
+            items.Add(item.Kind switch
+            {
+                SightItemKind.Line => item with
+                {
+                    X1 = axis * 2 - item.X1,
+                    X2 = axis * 2 - item.X2
+                },
+                SightItemKind.Rectangle => item with
+                {
+                    X1 = axis * 2 - (item.X1 + item.X2)
+                },
+                _ => item with { X1 = axis * 2 - item.X1 }
+            });
+        }
+        selectedIndices.Clear();
+        for (var index = first; index < items.Count; index++)
+            selectedIndices.Add(index);
+        selected = items.Count - 1;
+        shape.SelectedItem = "Custom";
         Changed();
     }
 

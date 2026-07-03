@@ -6,14 +6,12 @@ namespace HeliSightBuilder.Native;
 
 public static partial class SightLogic
 {
+    public const int ImportedGameSegmentTarget = 3500;
     [GeneratedRegex(@"[-+]?(?:\d+\.\d+|\d+|\.\d+)(?:[eE][-+]?\d+)?")]
     private static partial Regex NumberRegex();
 
     [GeneratedRegex(@"\[(VECTOR_[A-Z_]+),([^\]]+)\]")]
     public static partial Regex CommandRegex();
-
-    [GeneratedRegex(@"[MmLlHhVvZz]|[-+]?(?:\d+\.\d+|\d+|\.\d+)(?:[eE][-+]?\d+)?")]
-    private static partial Regex PathTokenRegex();
 
     public static string Number(double value)
     {
@@ -89,113 +87,131 @@ public static partial class SightLogic
 
     public static List<SightItem> ImportSvg(string path)
     {
-        var items = new List<SightItem>();
-        foreach (var e in XDocument.Load(path, LoadOptions.None).Descendants())
-        {
-            double A(string name, double fallback = 0)
-            {
-                var m = NumberRegex().Match(e.Attribute(name)?.Value ?? "");
-                return m.Success ? double.Parse(m.Value, CultureInfo.InvariantCulture) : fallback;
-            }
-            switch (e.Name.LocalName.ToLowerInvariant())
-            {
-                case "line":
-                    items.Add(new(SightItemKind.Line, A("x1"), A("y1"), A("x2"), A("y2")));
-                    break;
-                case "rect":
-                    items.Add(new(SightItemKind.Rectangle, A("x"), A("y"), A("width"), A("height")));
-                    break;
-                case "circle":
-                    items.Add(new(SightItemKind.Ellipse, A("cx"), A("cy"), A("r", 1), A("r", 1)));
-                    break;
-                case "ellipse":
-                    items.Add(new(SightItemKind.Ellipse, A("cx"), A("cy"), A("rx", 1), A("ry", 1)));
-                    break;
-                case "polyline":
-                case "polygon":
-                    var nums = NumberRegex().Matches(e.Attribute("points")?.Value ?? "").Select(m => double.Parse(m.Value, CultureInfo.InvariantCulture)).ToArray();
-                    var pts = nums.Chunk(2).Where(p => p.Length == 2)
-                        .Select(p => new PointF((float)p[0], (float)p[1])).ToList();
-                    for (var i = 1; i < pts.Count; i++)
-                        items.Add(new(SightItemKind.Line, pts[i - 1].X, pts[i - 1].Y, pts[i].X, pts[i].Y));
-                    if (e.Name.LocalName.Equals("polygon", StringComparison.OrdinalIgnoreCase) && pts.Count > 2)
-                        items.Add(new(SightItemKind.Line, pts[^1].X, pts[^1].Y, pts[0].X, pts[0].Y));
-                    break;
-                case "path":
-                    items.AddRange(PathLines(e.Attribute("d")?.Value));
-                    break;
-            }
-        }
-        if (items.Count == 0) throw new InvalidDataException("No supported SVG line art was found.");
-        return Normalize(items);
+        var normalized = Normalize(SvgLineArtImporter.Import(path));
+        if (normalized.Count <= ImportedGameSegmentTarget) return normalized;
+
+        List<SightItem> optimized = normalized;
+        for (var tolerance = .005; tolerance <= .16 && optimized.Count > ImportedGameSegmentTarget;
+             tolerance *= 1.6)
+            optimized = SimplifyConnectedLines(normalized, tolerance);
+        return optimized;
     }
 
-    private static IEnumerable<SightItem> PathLines(string? value)
+    private static List<SightItem> SimplifyConnectedLines(List<SightItem> source, double tolerance)
     {
-        var tokens = PathTokenRegex().Matches(value ?? "").Select(m => m.Value).ToArray();
-        var result = new List<SightItem>();
-        var position = 0;
-        var command = "";
-        double x = 0, y = 0, startX = 0, startY = 0;
-        while (position < tokens.Length)
+        var result = new List<SightItem>(Math.Min(source.Count, ImportedGameSegmentTarget));
+        var chain = new List<DPoint>();
+
+        void Flush()
         {
-            if (tokens[position].Length == 1 && char.IsLetter(tokens[position][0]))
-                command = tokens[position++];
-            if (command.Length == 0) break;
-            var upper = char.ToUpperInvariant(command[0]);
-            var relative = char.IsLower(command[0]);
-            double Next() => double.Parse(tokens[position++], CultureInfo.InvariantCulture);
-            if (upper == 'M' && position + 1 < tokens.Length)
+            if (chain.Count < 2)
             {
-                var nextX = Next();
-                var nextY = Next();
-                if (relative)
-                {
-                    nextX += x;
-                    nextY += y;
-                }
-                x = startX = nextX;
-                y = startY = nextY;
-                command = relative ? "l" : "L";
+                chain.Clear();
+                return;
             }
-            else if (upper == 'L' && position + 1 < tokens.Length)
-            {
-                var nextX = Next();
-                var nextY = Next();
-                if (relative)
-                {
-                    nextX += x;
-                    nextY += y;
-                }
-                result.Add(new(SightItemKind.Line, x, y, nextX, nextY));
-                x = nextX;
-                y = nextY;
-            }
-            else if (upper == 'H' && position < tokens.Length)
-            {
-                var nextX = Next();
-                if (relative) nextX += x;
-                result.Add(new(SightItemKind.Line, x, y, nextX, y));
-                x = nextX;
-            }
-            else if (upper == 'V' && position < tokens.Length)
-            {
-                var nextY = Next();
-                if (relative) nextY += y;
-                result.Add(new(SightItemKind.Line, x, y, x, nextY));
-                y = nextY;
-            }
-            else if (upper == 'Z')
-            {
-                result.Add(new(SightItemKind.Line, x, y, startX, startY));
-                x = startX;
-                y = startY;
-                command = "";
-            }
-            else position++;
+
+            var closed = Near(chain[0], chain[^1]);
+            var simplified = closed
+                ? SimplifyClosed(chain, tolerance)
+                : DouglasPeucker(chain, tolerance);
+            for (var index = 1; index < simplified.Count; index++)
+                result.Add(new(SightItemKind.Line, simplified[index - 1].X, simplified[index - 1].Y,
+                    simplified[index].X, simplified[index].Y));
+            chain.Clear();
         }
+
+        foreach (var item in source)
+        {
+            if (item.Kind != SightItemKind.Line)
+            {
+                Flush();
+                result.Add(item);
+                continue;
+            }
+
+            var start = new DPoint(item.X1, item.Y1);
+            var end = new DPoint(item.X2, item.Y2);
+            if (chain.Count == 0)
+            {
+                chain.Add(start);
+                chain.Add(end);
+            }
+            else if (Near(chain[^1], start))
+                chain.Add(end);
+            else
+            {
+                Flush();
+                chain.Add(start);
+                chain.Add(end);
+            }
+        }
+        Flush();
         return result;
     }
+
+    private static List<DPoint> SimplifyClosed(List<DPoint> source, double tolerance)
+    {
+        var points = source.Take(source.Count - 1).ToList();
+        if (points.Count < 4) return source;
+        var split = 1;
+        var farthest = 0d;
+        for (var index = 1; index < points.Count; index++)
+        {
+            var distance = DistanceSquared(points[0], points[index]);
+            if (distance <= farthest) continue;
+            farthest = distance;
+            split = index;
+        }
+
+        var first = DouglasPeucker(points.Take(split + 1).ToList(), tolerance);
+        var secondSource = points.Skip(split).ToList();
+        secondSource.Add(points[0]);
+        var second = DouglasPeucker(secondSource, tolerance);
+        first.AddRange(second.Skip(1));
+        if (!Near(first[0], first[^1])) first.Add(first[0]);
+        return first;
+    }
+
+    private static List<DPoint> DouglasPeucker(List<DPoint> points, double tolerance)
+    {
+        if (points.Count <= 2) return points;
+        var keep = new bool[points.Count];
+        keep[0] = keep[^1] = true;
+        var pending = new Stack<(int Start, int End)>();
+        pending.Push((0, points.Count - 1));
+        while (pending.Count > 0)
+        {
+            var (start, end) = pending.Pop();
+            var maximum = tolerance;
+            var selected = -1;
+            for (var index = start + 1; index < end; index++)
+            {
+                var distance = DistanceToLine(points[index], points[start], points[end]);
+                if (distance <= maximum) continue;
+                maximum = distance;
+                selected = index;
+            }
+            if (selected < 0) continue;
+            keep[selected] = true;
+            pending.Push((start, selected));
+            pending.Push((selected, end));
+        }
+        return points.Where((_, index) => keep[index]).ToList();
+    }
+
+    private static bool Near(DPoint a, DPoint b) =>
+        Math.Abs(a.X - b.X) <= .00001 && Math.Abs(a.Y - b.Y) <= .00001;
+    private static double DistanceSquared(DPoint a, DPoint b) =>
+        (a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y);
+    private static double DistanceToLine(DPoint point, DPoint start, DPoint end)
+    {
+        var length = Math.Sqrt(DistanceSquared(start, end));
+        if (length < 1e-12) return Math.Sqrt(DistanceSquared(point, start));
+        return Math.Abs((end.Y - start.Y) * point.X - (end.X - start.X) * point.Y +
+            end.X * start.Y - end.Y * start.X) / length;
+    }
+
+    private readonly record struct DPoint(double X, double Y);
 
     private static List<SightItem> Normalize(List<SightItem> items)
     {
@@ -227,17 +243,51 @@ public static partial class SightLogic
     private static string CompileMode(string text, bool opaqueFill)
     {
         var result = new List<string>();
+        var lineChain = new List<double>();
+
+        void FlushLineChain()
+        {
+            if (lineChain.Count < 4) return;
+            const int maxPointsPerCommand = 7;
+            var pointCount = lineChain.Count / 2;
+            for (var startPoint = 0; startPoint < pointCount - 1;
+                 startPoint += maxPointsPerCommand - 1)
+            {
+                var count = Math.Min(maxPointsPerCommand, pointCount - startPoint);
+                result.Add($"[VECTOR_LINE,{string.Join(",",
+                    lineChain.Skip(startPoint * 2).Take(count * 2).Select(Number))}]");
+                if (startPoint + count >= pointCount) break;
+            }
+            lineChain.Clear();
+        }
+
         foreach (Match m in CommandRegex().Matches(text))
         {
             var command = m.Groups[1].Value;
             var values = NumberRegex().Matches(m.Groups[2].Value)
                 .Select(n => double.Parse(n.Value, CultureInfo.InvariantCulture)).ToArray();
-            if (command == "VECTOR_FILLED_ELLIPSE")
+            if (command == "VECTOR_LINE" && values.Length == 4)
             {
+                var connects = lineChain.Count >= 2 &&
+                    Math.Abs(lineChain[^2] - values[0]) <= .001 &&
+                    Math.Abs(lineChain[^1] - values[1]) <= .001;
+                if (!connects)
+                {
+                    FlushLineChain();
+                    lineChain.Add(values[0]);
+                    lineChain.Add(values[1]);
+                }
+                lineChain.Add(values[2]);
+                lineChain.Add(values[3]);
+            }
+            else if (command == "VECTOR_FILLED_ELLIPSE")
+            {
+                FlushLineChain();
                 result.Add($"[VECTOR_ELLIPSE,{string.Join(",", values.Select(Number))}]");
             }
             else if (command == "VECTOR_ELLIPSE" && opaqueFill)
             {
+                FlushLineChain();
                 if (values.Length < 4) continue;
                 const int segments = 48;
                 var points = new List<string>((segments + 1) * 2);
@@ -251,9 +301,11 @@ public static partial class SightLogic
             }
             else
             {
+                FlushLineChain();
                 result.Add($"[{command},{string.Join(",", values.Select(Number))}]");
             }
         }
+        FlushLineChain();
         return string.Join(",", result);
     }
 
