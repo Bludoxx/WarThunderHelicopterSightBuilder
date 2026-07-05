@@ -9,7 +9,7 @@ Updates and demonstrations are posted on
 [my YouTube channel](https://www.youtube.com/@Bludoxx).
 
 ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4)
-![Release](https://img.shields.io/badge/release-v1.5.1-2E7D32)
+![Release](https://img.shields.io/badge/release-v1.5.2-2E7D32)
 ![License](https://img.shields.io/badge/license-CC%20BY--NC--SA%204.0-555555)
 
 ## Download
@@ -28,6 +28,28 @@ To verify a download in PowerShell:
 ```powershell
 Get-FileHash .\HeliSightBuilder.exe -Algorithm SHA256
 ```
+
+## Compatibility
+
+Cockpit support depends on the helicopter HUD:
+
+| Helicopter type | Cockpit custom sight | Third-person custom sight | Live range |
+| --- | --- | --- | --- |
+| Standard HUD with rocket CCIP | Yes | Yes | Cockpit only |
+| No rocket CCIP | No | Yes | No |
+| HMD HUD | No | Yes | No |
+
+The complete cockpit setup works on non-HMD helicopters with rocket CCIP, such
+as the Ka-50, Mi-24, and Mi-28 families. Similar helicopters using the standard
+rocket CCIP HUD should work as well.
+
+On a helicopter without rocket CCIP, the game does not draw this sight in the
+cockpit. The custom symbol can still appear in third person.
+
+HMD-equipped helicopters use a different cockpit HUD path, so neither the
+custom symbol nor its range label is drawn there. The custom symbol still works
+in third person, but the distance value is refreshed by the cockpit ILS and is
+not useful in third person.
 
 ## Quick start
 
@@ -83,10 +105,11 @@ needs to be restored.
 
 ### Size and appearance
 
-- **Design scale %** uses a normalized scale. A design at `100%` occupies the
-  same overall envelope regardless of its original or imported coordinates.
+- **Design scale %** is a fixed multiplier for custom drawings. Adding,
+  deleting, or moving a shape does not resize the rest of the sight.
 - **In-game size** fits the complete design to Small, Medium, Large, or Extra
-  Large. Choose Custom for direct percentage control.
+  Large. These choices deliberately recalculate the scale; choose Custom for
+  direct percentage control.
 - **Line width** changes stroke thickness in the editor, fullscreen preview,
   saved design, and generated game package.
 - **Sight color** sets the generated HUD color.
@@ -94,6 +117,12 @@ needs to be restored.
   or 4K using the standard helicopter HUD canvas scale.
 - The yellow CCIP marker sets the point that will be placed on the game's
   calculated rocket impact position.
+- **Show live range (cockpit)** adds the game's existing rocket CCIP distance
+  value to the sight as kilometers with three decimals. The game refreshes this
+  value through the cockpit ILS path; third-person display is not guaranteed to
+  update. Enter its X/Y position or use
+  **Pick range position on canvas**. The position is stored relative to the
+  selected CCIP origin when the package is built.
 
 Sight size is unrestricted. Build and Install do not reject a design because
 of its dimensions.
@@ -108,7 +137,7 @@ Saved designs: %LOCALAPPDATA%\HeliSightBuilder\designs
 Autosave:      %LOCALAPPDATA%\HeliSightBuilder\autosave-native.json
 ```
 
-Older saves are migrated to the normalized size system without intentionally
+Older saves are migrated to the fixed custom scale without intentionally
 changing their rendered size. Invalid or non-finite coordinates are rejected
 before they can enter the package.
 
@@ -198,7 +227,8 @@ the player's responsibility.
 
 For release history, see [CHANGELOG.md](CHANGELOG.md). Bug reports should
 include the builder version, the steps that caused the problem, and a screenshot
-or saved design when possible.
+or saved design when possible. See [SUPPORT.md](SUPPORT.md) for compatibility
+questions and [CONTRIBUTING.md](CONTRIBUTING.md) before submitting code.
 
 ## License
 

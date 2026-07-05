@@ -1,5 +1,62 @@
 # Changelog
 
+## v1.5.2 - 2026-07-05
+
+This update adds an optional cockpit range label and fixes the editor scale
+changing underneath a custom drawing.
+
+### Added
+
+- Optional live range text driven by the same `DistToTarget` state used by the
+  Ka-52's `ils28K` rocket-mode sight.
+- Three-decimal kilometer formatting, for example `6278 m` is displayed as
+  `6.278 km`.
+- Editable range-text X/Y position, canvas placement mode, text size, preview,
+  autosave, and named-design persistence.
+
+### Compatibility
+
+- Cockpit sight and range support requires a non-HMD helicopter with rocket
+  CCIP. This includes the Ka-50, Mi-24, and Mi-28 families.
+- Helicopters without rocket CCIP can still show the custom sight in third
+  person, but not in the cockpit.
+- HMD-HUD helicopters can show the custom sight in third person. Their cockpit
+  uses another HUD path, and the live range does not update in third person.
+
+### Fixed
+
+- The range label stays attached to the existing rocket canvas and moves with
+  the live CCIP.
+- Fixed the label being hidden in rocket mode by an unrelated laser-rangefinder
+  state check.
+- Fixed range-label placement and font scale disagreeing between the editor
+  canvas and the full-screen preview.
+- Calibrated range-text sizing so one editor unit equals four HUD pixels.
+- Lowered the editable text-size minimum to `0.25` with quarter-unit steps.
+- Calibrated the range-text previews for the cockpit collimator projection.
+  Preview text no longer appears four times larger than its cockpit result.
+- Centered range text through a zero-size HUD wrapper, matching War Thunder's
+  native range component. X/Y placement now targets the label center.
+- Custom geometry now uses a fixed design scale. Adding or removing a line no
+  longer rescales every existing shape or shifts it away from the grid.
+- Existing saved custom designs are migrated without changing their exported
+  in-game size.
+- Shape changes now participate in undo and autosave. Snap, grid, nudge, and
+  canvas zoom settings are also preserved immediately.
+- Tightened coordinate controls so the sidebar no longer needs horizontal
+  scrolling for ordinary editing.
+- Clarified in the controls and README that live distance updates come from
+  War Thunder's cockpit ILS state.
+- Fixed full-screen preview geometry using absolute design coordinates while
+  the range label used CCIP-relative coordinates. Both now share the exact
+  export transform.
+
+`HeliSightBuilder.exe` SHA-256:
+
+```text
+16FF23188E2A25898F8A066625B4F30C3CDBDF3B43A23D74F743A6236710598C
+```
+
 ## v1.5.1 - 2026-07-03
 
 ### Improved

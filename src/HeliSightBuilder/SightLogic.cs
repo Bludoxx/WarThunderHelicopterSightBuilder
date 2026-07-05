@@ -310,10 +310,14 @@ public static partial class SightLogic
     }
 
     public static string ReplaceSightFunction(string source, string mode0, string mode1, Color color,
-        double lineWidth = 2)
+        double lineWidth = 2, bool showLiveRange = false, double rangeOffsetX = 0,
+        double rangeOffsetY = 0, double rangeFontSize = 18)
     {
         if (!double.IsFinite(lineWidth) || lineWidth is < .1 or > 50)
             throw new ArgumentOutOfRangeException(nameof(lineWidth));
+        if (!double.IsFinite(rangeOffsetX) || !double.IsFinite(rangeOffsetY) ||
+            !double.IsFinite(rangeFontSize) || rangeFontSize is < 6 or > 72)
+            throw new ArgumentOutOfRangeException(nameof(rangeFontSize));
 
         const string marker = "function helicopterRocketSightMode";
         var start = source.IndexOf(marker, StringComparison.Ordinal);
@@ -348,8 +352,18 @@ public static partial class SightLogic
         var fillColor = $"$1Color({color.R}, {color.G}, {color.B}, {(opaqueFill ? 255 : 0)})";
         output = Regex.Replace(output, @"(color\s*=\s*)Color\(\d+,\s*\d+,\s*\d+,\s*\d+\)", lineColor);
         output = Regex.Replace(output, @"(fillColor\s*=\s*)Color\(\d+,\s*\d+,\s*\d+,\s*\d+\)", fillColor);
-        return Regex.Replace(output,
+        output = Regex.Replace(output,
             @"(rocketSightLineWidth\s*=\s*)[-+]?(?:\d+(?:\.\d*)?|\.\d+)",
             match => match.Groups[1].Value + Number(lineWidth));
+        output = Regex.Replace(output, @"(rocketRangeEnabled\s*=\s*)(?:true|false)",
+            match => match.Groups[1].Value + (showLiveRange ? "true" : "false"));
+        output = ReplaceRocketSetting(output, "rocketRangeOffsetX", rangeOffsetX);
+        output = ReplaceRocketSetting(output, "rocketRangeOffsetY", rangeOffsetY);
+        return ReplaceRocketSetting(output, "rocketRangeFontSize", rangeFontSize);
     }
+
+    private static string ReplaceRocketSetting(string source, string name, double value) =>
+        Regex.Replace(source,
+            $@"({Regex.Escape(name)}\s*=\s*)[-+]?(?:\d+(?:\.\d*)?|\.\d+)",
+            match => match.Groups[1].Value + Number(value));
 }

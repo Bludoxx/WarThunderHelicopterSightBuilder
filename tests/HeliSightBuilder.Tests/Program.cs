@@ -71,8 +71,17 @@ Run("Corrupted editor state recovery", () =>
         Items = [new(SightItemKind.Line, 0, 0, 1, 1)]
     };
     var current = EditorStateRules.Sanitize(currentLargeScale, out _);
-    Require(Math.Abs(current.Scale - 7) < .001,
-        "Existing visual size was not converted to normalized relative scale.");
+    Require(Math.Abs(current.Scale - 7000) < .001 && current.ScaleCalibrationVersion == 4,
+        "Existing custom visual size was not preserved by fixed-scale migration.");
+    var versionThree = corrupted with
+    {
+        Scale = 50,
+        ScaleCalibrationVersion = 3,
+        Items = [new(SightItemKind.Line, -100, 0, 100, 0)]
+    };
+    var migrated = EditorStateRules.Sanitize(versionThree, out _);
+    Require(Math.Abs(migrated.Scale - 250) < .001,
+        "Version-three custom scale migration changed exported geometry.");
     Require(Math.Abs(EditorStateRules.OutputScale(100) - 1) < .001,
         "100% no longer maps to the calibrated in-game scale.");
 });
@@ -153,7 +162,8 @@ Run("HUD replacement and colors", () =>
 {
     var air = File.ReadAllText(Path.Combine(source, "reactivegui", "airHudElems.nut"));
     var command = SightLogic.Commands(SightLogic.Preset("Dot", 4.2, 1));
-    var result = SightLogic.ReplaceSightFunction(air, command, command, Color.Cyan, 3.5);
+    var result = SightLogic.ReplaceSightFunction(air, command, command, Color.Cyan, 3.5,
+        true, 12.5, -7.25, 20);
     Require(result.Contains("Color(0, 255, 255, 255)", StringComparison.Ordinal), "Color was not replaced.");
     Require(result.Contains("fillColor = Color(0, 255, 255, 255)", StringComparison.Ordinal),
         "True dot fill was not enabled.");
@@ -162,6 +172,18 @@ Run("HUD replacement and colors", () =>
     Require(result.Contains("rocketSightLineWidth = 3.5", StringComparison.Ordinal) &&
         result.Contains("lineWidth = hdpx(rocketSightLineWidth)", StringComparison.Ordinal),
         "Selected line width was not compiled into the HUD.");
+    Require(result.Contains("rocketRangeEnabled = true", StringComparison.Ordinal) &&
+        result.Contains("rocketRangeOffsetX = 12.5", StringComparison.Ordinal) &&
+        result.Contains("rocketRangeOffsetY = -7.25", StringComparison.Ordinal) &&
+        result.Contains("rocketRangeFontSize = 20", StringComparison.Ordinal),
+        "Live range settings were not compiled into the HUD.");
+    Require(result.Contains("string.format(\"%.3f km\", DistToTarget.get() / 1000.0)",
+        StringComparison.Ordinal), "Live range does not use three-decimal kilometer formatting.");
+    Require(result.Contains("watch = DistToTarget", StringComparison.Ordinal) &&
+        result.Contains("watch = RocketSightMode", StringComparison.Ordinal),
+        "Live range is not connected to the rocket CCIP distance watcher.");
+    Require(!result.Contains("opacity = IsRangefinderEnabled.get() && RangefinderDist.get() > 0",
+        StringComparison.Ordinal), "Live range is incorrectly gated by the laser rangefinder.");
     Require(result.Contains("function helicopterRocketSightMode", StringComparison.Ordinal), "Sight function missing.");
     Require(!result.Contains("function helicopterRocketSightFillMode", StringComparison.Ordinal),
         "Unsupported second HUD command layer was generated.");
@@ -170,8 +192,11 @@ Run("HUD replacement and colors", () =>
     var rocketAim = result[result.IndexOf("let helicopterRocketAim", StringComparison.Ordinal)..
         result.IndexOf("let turretAnglesAspect", StringComparison.Ordinal)];
     Require(rocketAim.Contains("return style.__merge({", StringComparison.Ordinal) &&
-        !rocketAim.Contains("children =", StringComparison.Ordinal),
-        "Known-working single-canvas HUD structure changed.");
+        rocketAim.Contains("children = rocketRangeEnabled ? rocketRangeText(height) : null",
+            StringComparison.Ordinal) &&
+        result.Contains("size = 0", StringComparison.Ordinal) &&
+        System.Text.RegularExpressions.Regex.Matches(rocketAim, "ROBJ_VECTOR_CANVAS").Count == 1,
+        "Live range changed the known-working single-canvas HUD structure or lost centered anchoring.");
 
     var outlineCircle = SightLogic.Commands([new(SightItemKind.Ellipse, 0, 0, 10, 10)]);
     var outlineResult = SightLogic.ReplaceSightFunction(air, outlineCircle, outlineCircle, Color.White);

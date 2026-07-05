@@ -65,12 +65,22 @@ public static class EditorStateRules
                 scale = scale * extent / RelativeSizeReferenceEnvelope;
             recovered = true;
         }
+        if (state.ScaleCalibrationVersion < 4 && shape == "Custom" && validItems)
+        {
+            var extent = GeometryExtent(items);
+            if (extent > .000001)
+                scale = scale * RelativeSizeReferenceEnvelope / extent;
+            recovered = true;
+        }
         var originX = Range(state.OriginX, -MaxCoordinate, MaxCoordinate, 0, ref recovered);
         var originY = Range(state.OriginY, -MaxCoordinate, MaxCoordinate, 0, ref recovered);
         var zoom = Range(state.Zoom, MinimumZoom, MaximumZoom, DefaultZoom, ref recovered);
         var grid = Range(state.Grid, MinimumGrid, 100, DefaultGrid, ref recovered);
         var nudge = Range(state.Nudge, MinimumNudge, 100, DefaultNudge, ref recovered);
         var lineWidth = Range(state.LineWidth, .1, 50, 2, ref recovered);
+        var rangeX = Range(state.RangeX, -MaxCoordinate, MaxCoordinate, 0, ref recovered);
+        var rangeY = Range(state.RangeY, -MaxCoordinate, MaxCoordinate, 5, ref recovered);
+        var rangeFontSize = Range(state.RangeFontSize, .25, 72, 10, ref recovered);
         var selected = Math.Clamp(state.Selected, -1, items.Count - 1);
         recovered |= selected != state.Selected;
 
@@ -81,9 +91,9 @@ public static class EditorStateRules
 
         return new AppState(shape, size, gap, scale, color, originX, originY,
             [.. items], selected, output, tool, part, zoom, state.Snap, grid, nudge,
-            state.GameContent, 3, state.DarkMode,
+            state.GameContent, 4, state.DarkMode,
             string.IsNullOrWhiteSpace(state.SizeProfile) ? "Custom" : state.SizeProfile,
-            lineWidth);
+            lineWidth, state.ShowLiveRange, rangeX, rangeY, rangeFontSize);
     }
 
     public static double SafeCoordinate(double value) =>

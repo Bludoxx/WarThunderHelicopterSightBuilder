@@ -8,7 +8,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>HeliSightBuilder</AssemblyName>
     <RootNamespace>HeliSightBuilder.Native</RootNamespace>
-    <Version>1.5.1</Version>
+    <Version>1.5.2</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\HeliSightBuilder.ico</ApplicationIcon>
     <PublishSingleFile>false</PublishSingleFile>

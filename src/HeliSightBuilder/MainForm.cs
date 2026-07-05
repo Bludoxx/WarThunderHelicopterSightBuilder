@@ -7,6 +7,8 @@ namespace HeliSightBuilder.Native;
 public sealed class MainForm : Form
 {
     private const double StandardHudHeightFraction = .018;
+    private const double RangeFontHudScale = 4;
+    private const double CockpitRangePreviewScale = .25;
     private const int CommandDisplayLimit = 50_000;
     private readonly ComboBox shape = Box(["Dot", "Circle", "Cross", "Box", "T Sight", "Custom"]);
     private readonly ComboBox tool = Box(["Select", "Pan", "Line", "Circle", "Box", "Dot"]);
@@ -25,6 +27,9 @@ public sealed class MainForm : Form
     private readonly NumericUpDown nudge = Number(.5m, .1m, 100, (decimal)EditorStateRules.MinimumNudge);
     private readonly NumericUpDown originX = Number(0, .1m, 1000000, -1000000);
     private readonly NumericUpDown originY = Number(0, .1m, 1000000, -1000000);
+    private readonly NumericUpDown rangeX = Number(0, .1m, 1000000, -1000000);
+    private readonly NumericUpDown rangeY = Number(5, .1m, 1000000, -1000000);
+    private readonly NumericUpDown rangeFontSize = Number(10, .25m, 72, .25m);
     private readonly Label valueALabel = new() { Text = "X", AutoSize = true };
     private readonly Label valueBLabel = new() { Text = "Y", AutoSize = true };
     private readonly Label valueCLabel = new() { Text = "R X", AutoSize = true };
@@ -35,6 +40,8 @@ public sealed class MainForm : Form
     private readonly NumericUpDown valueD = Number(0, .1m, 1000000, -1000000);
     private readonly CheckBox snap = new() { Text = "Snap to grid", Checked = true, AutoSize = true };
     private readonly CheckBox pickOrigin = new() { Text = "Pick CCIP origin on canvas", AutoSize = true };
+    private readonly CheckBox showLiveRange = new() { Text = "Show live range (cockpit)", AutoSize = true };
+    private readonly CheckBox pickRangePosition = new() { Text = "Pick range position on canvas", AutoSize = true };
     private readonly CheckBox darkMode = new() { Text = "Dark mode", AutoSize = true };
     private readonly CheckBox fullScreenPreview = new() { Text = "Embed preview", AutoSize = true };
     private readonly Button openFullScreenPreview = new() { Text = "Full Screen", AutoSize = true };
@@ -96,6 +103,10 @@ public sealed class MainForm : Form
         tool.Width = 150;
         zoom.Width = 82;
         previewResolution.Width = 130;
+        foreach (var compact in new[] { valueA, valueB, valueC, valueD })
+            compact.Width = 60;
+        foreach (var paired in new[] { originX, originY, rangeX, rangeY, grid, nudge })
+            paired.Width = 88;
         shape.SelectedItem = "Dot"; tool.SelectedItem = "Select"; part.SelectedItem = "Crosshair"; color.SelectedItem = "White";
         sizeProfile.SelectedItem = "Medium";
         previewResolution.SelectedItem = "1920 x 1080";
@@ -210,14 +221,22 @@ public sealed class MainForm : Form
         Sync();
 
         tool.SelectedItem = "Line";
+        snap.Checked = true;
+        grid.Value = 1;
         Require(shape.Text == "Custom", "custom mode activation");
         Require(tool.Text == "Line", "line tool activation");
         Require(!pickOrigin.Checked, "origin picker inactive");
+        var scaleBeforeFirstLine = OutputScale;
         CanvasDown(canvas, new MouseEventArgs(MouseButtons.Left, 1, 100, 100, 0));
         CanvasMove(canvas, new MouseEventArgs(MouseButtons.Left, 0, 800, 400, 0));
         Require(dragStart is not null && dragCurrent is not null, "live drag preview state");
         CanvasUp(canvas, new MouseEventArgs(MouseButtons.Left, 1, 800, 400, 0));
         Require(items.Count == 1 && items[0].Kind == SightItemKind.Line, "long line drawing");
+        Require(Math.Abs(OutputScale - scaleBeforeFirstLine) < .000001,
+            "first line does not rescale custom canvas");
+        Require(new[] { items[0].X1, items[0].Y1, items[0].X2, items[0].Y2 }
+                .All(value => Math.Abs(value * OutputScale % GridOutputSpacing) < .000001),
+            "first line remains aligned to visible grid");
         Require(Math.Abs(items[0].X2 - items[0].X1) * OutputScale > 100,
             "drawing has no artificial size cap");
 
@@ -288,6 +307,9 @@ public sealed class MainForm : Form
             "size awareness and saved-design controls");
         Require(FindButton(controlPanel, "Mirror Selected (CCIP)") is not null,
             "mirror selected button discovery");
+        Require(controlPanel.Controls.Cast<Control>().Any(control =>
+            control is CheckBox checkBox && checkBox.Text == "Show live range (cockpit)"),
+            "live range controls discovery");
         Show();
         Application.DoEvents();
         rightButton!.PerformClick();
@@ -324,6 +346,31 @@ public sealed class MainForm : Form
         Application.DoEvents();
         Require(Math.Abs((double)originX.Value + 2.15) < .001, "decimal numeric commit");
         Hide();
+
+        pickRangePosition.Checked = true;
+        var preciseRange = ToScreen(3.25 * OutputScale, 4.5 * OutputScale);
+        CanvasDown(canvas, new MouseEventArgs(MouseButtons.Left, 1,
+            (int)preciseRange.X, (int)preciseRange.Y, 0));
+        Require(showLiveRange.Checked &&
+            Math.Abs((double)rangeX.Value - 3.25) <= mousePixelTolerance &&
+            Math.Abs((double)rangeY.Value - 4.5) <= mousePixelTolerance,
+            "canvas live range placement");
+        rangeFontSize.Value = 21;
+        var rangeState = CaptureState();
+        Require(rangeState.ShowLiveRange && rangeState.RangeFontSize == 21,
+            "live range state persistence");
+        rangeFontSize.Value = 6;
+        Require(Math.Abs(RangeHudFontSize - 24) < .001,
+            "live range HUD font calibration");
+        Require(Math.Abs(RangeCockpitFontPixels1080 - 6) < .001,
+            "cockpit range preview calibration");
+        var ccipRelativeRange = CcipRelativeOutput(
+            (double)rangeX.Value * OutputScale, (double)rangeY.Value * OutputScale);
+        Require(Math.Abs(ccipRelativeRange.X -
+                ((double)rangeX.Value - (double)originX.Value) * OutputScale) < .001 &&
+            Math.Abs(ccipRelativeRange.Y -
+                ((double)rangeY.Value - (double)originY.Value) * OutputScale) < .001,
+            "full-screen range and sight share CCIP origin");
 
         var countBeforeUndo = items.Count;
         tool.SelectedItem = "Dot";
@@ -382,12 +429,12 @@ public sealed class MainForm : Form
         scale.Value = 1;
         Sync();
         Require(!sizeAwareness.Text.Contains("Warning", StringComparison.OrdinalIgnoreCase) &&
-            Math.Abs(CurrentOutputExtent() - 10) < .1,
+            Math.Abs(CurrentOutputExtent() - .02) < .001,
             "small relative size has no false warning");
         scale.Value = 10000;
         Sync();
         Require(!sizeAwareness.Text.Contains("Warning", StringComparison.OrdinalIgnoreCase) &&
-            Math.Abs(CurrentOutputExtent() - 100000) < 1,
+            Math.Abs(CurrentOutputExtent() - 200) < .1,
             "large relative size remains unrestricted");
         ApplyTargetSize("Medium");
         Require(Math.Abs(CurrentOutputExtent() - TargetExtent("Medium")) < 1,
@@ -562,6 +609,12 @@ public sealed class MainForm : Form
         controls.Controls.Add(Row(
             Button("Use Selected Center", (_, _) => UseSelectedOrigin()),
             Button("Reset Origin", (_, _) => { originX.Value = 0; originY.Value = 0; Changed(); })));
+        controls.Controls.Add(Section("Cockpit range"));
+        controls.Controls.Add(showLiveRange);
+        controls.Controls.Add(Row(new Label { Text = "X", AutoSize = true }, rangeX,
+            new Label { Text = "Y", AutoSize = true }, rangeY));
+        AddField(controls, "Text size", rangeFontSize);
+        controls.Controls.Add(pickRangePosition);
         controls.Controls.Add(Button("Reset View", (_, _) =>
         {
             pan = PointF.Empty;
@@ -624,8 +677,12 @@ public sealed class MainForm : Form
 
     private void WireEvents()
     {
-        shape.SelectedValueChanged += (_, _) => Sync();
-        foreach (var numeric in new[] { size, gap, scale, lineWidth, originX, originY })
+        shape.SelectedValueChanged += (_, _) =>
+        {
+            if (!loading) Changed();
+        };
+        foreach (var numeric in new[] { size, gap, scale, lineWidth, originX, originY,
+                     rangeX, rangeY, rangeFontSize, grid, nudge })
         {
             numeric.Validated += (_, _) =>
             {
@@ -659,10 +716,20 @@ public sealed class MainForm : Form
             ApplyTheme();
             if (!loading) Changed();
         };
+        showLiveRange.CheckedChanged += (_, _) => { if (!loading) Changed(); };
+        snap.CheckedChanged += (_, _) =>
+        {
+            canvas.Invalidate();
+            if (!loading) ScheduleAutosave();
+        };
         fullScreenPreview.CheckedChanged += (_, _) => { UpdatePreviewPixelSize(); canvas.Invalidate(); };
         openFullScreenPreview.Click += (_, _) => ShowFullScreenPreview();
         previewResolution.SelectedValueChanged += (_, _) => { UpdatePreviewPixelSize(); canvas.Invalidate(); };
-        zoom.ValueChanged += (_, _) => canvas.Invalidate();
+        zoom.ValueChanged += (_, _) =>
+        {
+            canvas.Invalidate();
+            if (!loading) ScheduleAutosave();
+        };
         gameContent.Validated += (_, _) => { if (!loading) Changed(); };
         tool.SelectedValueChanged += (_, _) => UpdateCanvasCursor();
         autosaveTimer.Tick += (_, _) => { autosaveTimer.Stop(); SaveAutosave(); };
@@ -724,7 +791,8 @@ public sealed class MainForm : Form
     private AppState CaptureState() => new(shape.Text, (double)size.Value, (double)gap.Value, (double)scale.Value, color.Text,
         (double)originX.Value, (double)originY.Value, [.. items], selected, output.Text, tool.Text, part.Text,
         (double)zoom.Value, snap.Checked, (double)grid.Value, (double)nudge.Value, gameContent.Text, 3,
-        darkMode.Checked, sizeProfile.Text, (double)lineWidth.Value);
+        darkMode.Checked, sizeProfile.Text, (double)lineWidth.Value, showLiveRange.Checked,
+        (double)rangeX.Value, (double)rangeY.Value, (double)rangeFontSize.Value);
     private void Restore(AppState state)
     {
         state = EditorStateRules.Sanitize(state, out var recovered);
@@ -741,6 +809,10 @@ public sealed class MainForm : Form
         grid.Value = Clamp(grid, state.Grid <= 0 ? 1 : state.Grid);
         nudge.Value = Clamp(nudge, state.Nudge <= 0 ? .5 : state.Nudge);
         lineWidth.Value = Clamp(lineWidth, state.LineWidth);
+        showLiveRange.Checked = state.ShowLiveRange;
+        rangeX.Value = Clamp(rangeX, state.RangeX);
+        rangeY.Value = Clamp(rangeY, state.RangeY);
+        rangeFontSize.Value = Clamp(rangeFontSize, state.RangeFontSize);
         gameContent.Text = state.GameContent ?? GameInstallService.DetectContentDirectory() ?? "";
         darkMode.Checked = state.DarkMode;
         sizeProfile.SelectedItem = string.IsNullOrWhiteSpace(state.SizeProfile) ? "Custom" : state.SizeProfile;
@@ -765,7 +837,18 @@ public sealed class MainForm : Form
             canvas.Cursor = Cursors.Hand;
             return;
         }
-        if (e.Button != MouseButtons.Left || shape.Text != "Custom") return;
+        if (e.Button != MouseButtons.Left) return;
+        if (pickRangePosition.Checked)
+        {
+            var rangePoint = ToDesign(e.Location, false);
+            rangeX.Value = Clamp(rangeX, rangePoint.X);
+            rangeY.Value = Clamp(rangeY, rangePoint.Y);
+            pickRangePosition.Checked = false;
+            showLiveRange.Checked = true;
+            Changed();
+            return;
+        }
+        if (shape.Text != "Custom") return;
         if (tool.Text == "Select" && !pickOrigin.Checked)
         {
             var point = ToDesign(e.Location, false);
@@ -911,6 +994,9 @@ public sealed class MainForm : Form
         }
         if (dragStart is PointF start && dragCurrent is PointF current)
             DrawPreviewItem(e.Graphics, PreviewItem(start, current).Scale(OutputScale));
+        if (showLiveRange.Checked)
+            DrawRangePreview(e.Graphics, ToScreen((double)rangeX.Value * OutputScale,
+                (double)rangeY.Value * OutputScale), CanvasRangeFontPixels);
         if (selectionStart is PointF selectA && selectionCurrent is PointF selectB)
         {
             var a = ToScreen(selectA.X * OutputScale, selectA.Y * OutputScale);
@@ -965,12 +1051,14 @@ public sealed class MainForm : Form
             viewport.Height / PreviewResolution().Height * (float)lineWidth.Value));
         foreach (var item in drawItems)
         {
-            var a = new PointF(center.X + (float)item.X1 * pixelsPerUnit,
-                center.Y + (float)item.Y1 * pixelsPerUnit);
+            var relativeA = CcipRelativeOutput(item.X1, item.Y1);
+            var a = new PointF(center.X + relativeA.X * pixelsPerUnit,
+                center.Y + relativeA.Y * pixelsPerUnit);
             if (item.Kind == SightItemKind.Line)
             {
-                var b = new PointF(center.X + (float)item.X2 * pixelsPerUnit,
-                    center.Y + (float)item.Y2 * pixelsPerUnit);
+                var relativeB = CcipRelativeOutput(item.X2, item.Y2);
+                var b = new PointF(center.X + relativeB.X * pixelsPerUnit,
+                    center.Y + relativeB.Y * pixelsPerUnit);
                 graphics.DrawLine(pen, a, b);
             }
             else if (item.Kind is SightItemKind.Ellipse or SightItemKind.FilledEllipse)
@@ -993,6 +1081,47 @@ public sealed class MainForm : Form
                     Math.Abs(b.X - a.X), Math.Abs(b.Y - a.Y));
             }
         }
+        if (showLiveRange.Checked)
+        {
+            var outputScale = OutputScale;
+            var relativeRange = CcipRelativeOutput(
+                (double)rangeX.Value * outputScale, (double)rangeY.Value * outputScale);
+            var rangePosition = new PointF(
+                center.X + relativeRange.X * pixelsPerUnit,
+                center.Y + relativeRange.Y * pixelsPerUnit);
+            DrawRangePreview(graphics, rangePosition,
+                Math.Max(1, (float)RangeCockpitFontPixels1080 * viewport.Height / 1080));
+        }
+    }
+
+    private float CanvasRangeFontPixels
+    {
+        get
+        {
+            const double pixelsPerOutputUnitAt1080 = 1080 * StandardHudHeightFraction / 100;
+            return (float)Math.Max(1, RangeCockpitFontPixels1080 * Pixels /
+                pixelsPerOutputUnitAt1080);
+        }
+    }
+
+    private double RangeHudFontSize => (double)rangeFontSize.Value * RangeFontHudScale;
+    private double RangeCockpitFontPixels1080 => RangeHudFontSize * CockpitRangePreviewScale;
+
+    private PointF CcipRelativeOutput(double outputX, double outputY) => new(
+        (float)(outputX - (double)originX.Value * OutputScale),
+        (float)(outputY - (double)originY.Value * OutputScale));
+
+    private void DrawRangePreview(Graphics graphics, PointF position, float fontPixels)
+    {
+        using var font = new Font("Segoe UI", Math.Max(1, fontPixels), FontStyle.Regular,
+            GraphicsUnit.Pixel);
+        using var brush = new SolidBrush(ColorValue());
+        using var format = new StringFormat
+        {
+            Alignment = StringAlignment.Center,
+            LineAlignment = StringAlignment.Center
+        };
+        graphics.DrawString("6.278 km", font, brush, position, format);
     }
 
     private void ShowFullScreenPreview()
@@ -1371,7 +1500,9 @@ public sealed class MainForm : Form
         var extent = GeometryExtent(CurrentSourceItems());
         var target = TargetExtent(profile);
         if (extent <= .000001 || target <= 0) return;
-        var percent = target / EditorStateRules.RelativeSizeReferenceEnvelope * 100;
+        var percent = shape.Text == "Custom"
+            ? target / extent * 100
+            : target / EditorStateRules.RelativeSizeReferenceEnvelope * 100;
         loading = true;
         scale.Value = Clamp(scale, percent);
         sizeProfile.SelectedItem = profile;
@@ -1636,8 +1767,13 @@ public sealed class MainForm : Form
             var air = Path.Combine(source, "reactivegui", "airHudElems.nut");
             var mode0 = Shift(generatedCommands, 0, 100);
             var mode1 = Shift(generatedCommands, 0, 0);
+            var outputScale = OutputScale;
             var updatedHud = SightLogic.ReplaceSightFunction(
-                File.ReadAllText(air), mode0, mode1, ColorValue(), (double)lineWidth.Value);
+                File.ReadAllText(air), mode0, mode1, ColorValue(), (double)lineWidth.Value,
+                showLiveRange.Checked,
+                ((double)rangeX.Value - (double)originX.Value) * outputScale,
+                ((double)rangeY.Value - (double)originY.Value) * outputScale,
+                RangeHudFontSize);
             File.WriteAllText(air, updatedHud, new UTF8Encoding(false));
 
             var packageDirectory = Path.Combine(destination, "pkg_user");
@@ -1752,6 +1888,8 @@ public sealed class MainForm : Form
     {
         get
         {
+            if (shape.Text == "Custom")
+                return EditorStateRules.OutputScale((double)scale.Value);
             var extent = GeometryExtent(CurrentSourceItems());
             if (extent <= .000001) return 1;
             return (double)scale.Value / 100 *
@@ -1885,7 +2023,8 @@ public sealed record AppState(string Shape, double Size, double Gap, double Scal
     double OriginX, double OriginY, List<SightItem> Items, int Selected, string Output,
     string Tool, string Part, double Zoom, bool Snap, double Grid, double Nudge,
     string? GameContent = null, int ScaleCalibrationVersion = 0, bool DarkMode = false,
-    string SizeProfile = "Custom", double LineWidth = 2);
+    string SizeProfile = "Custom", double LineWidth = 2, bool ShowLiveRange = false,
+    double RangeX = 0, double RangeY = 5, double RangeFontSize = 10);
 
 public sealed class DoubleBufferedPanel : Panel
 {

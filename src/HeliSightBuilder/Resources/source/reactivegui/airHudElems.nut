@@ -10,7 +10,7 @@ let hudUnitType = require("%rGui/hudUnitType.nut")
 let HudStyle = require("%rGui/style/airHudStyle.nut")
 let weaponUtils = require("weaponUtils")
 
-let { AimLockPos, AimLockValid } = require("%rGui/planeState/planeToolsState.nut")
+let { AimLockPos, AimLockValid, DistToTarget } = require("%rGui/planeState/planeToolsState.nut")
 
 let { IsTargetTracked, TargetAge, TargetX, TargetY, TargetInZone } = require("%rGui/hud/targetTrackerState.nut")
 let { lockSight, targetSize } = require("%rGui/hud/targetTracker.nut")
@@ -1417,6 +1417,28 @@ function helicopterRocketSightMode(sightMode) {
 }
 
 let rocketSightLineWidth = 2.0
+let rocketRangeEnabled = false
+let rocketRangeOffsetX = 0.0
+let rocketRangeOffsetY = 0.0
+let rocketRangeFontSize = 18.0
+let rocketRangeText = @(height) @() {
+  halign = ALIGN_CENTER
+  valign = ALIGN_CENTER
+  size = 0
+  pos = [
+    height * rocketRangeOffsetX * 0.01,
+    height * (rocketRangeOffsetY + (RocketSightMode.get() == 0 ? 100 : 0)) * 0.01
+  ]
+  watch = RocketSightMode
+  children = @() HudStyle.styleText.__merge({
+    rendObj = ROBJ_TEXT
+    color = Color(255, 255, 255, 255)
+    font = Fonts.hud
+    fontSize = hdpx(rocketRangeFontSize)
+    text = string.format("%.3f km", DistToTarget.get() / 1000.0)
+    watch = DistToTarget
+  })
+}
 let helicopterRocketAim = @(width, height, color, style = HudStyle.styleLineForeground) function() {
 
   let lines = helicopterRocketSightMode(RocketSightMode.get())
@@ -1435,6 +1457,7 @@ let helicopterRocketAim = @(width, height, color, style = HudStyle.styleLineFore
       translate = [RocketAimX.get(), RocketAimY.get()]
     }
     commands = correctRocketSightAspect(lines, width, height)
+    children = rocketRangeEnabled ? rocketRangeText(height) : null
   })
 }
 

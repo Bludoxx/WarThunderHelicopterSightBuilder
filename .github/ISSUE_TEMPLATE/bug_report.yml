@@ -1,0 +1,47 @@
+name: Bug report
+description: Report a reproducible builder, preview, package, or install problem.
+title: "[Bug] "
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Builder version
+      placeholder: v1.5.2
+    validations:
+      required: true
+  - type: input
+    id: helicopter
+    attributes:
+      label: Helicopter and view
+      placeholder: Mi-24P, cockpit
+    validations:
+      required: true
+  - type: dropdown
+    id: hud
+    attributes:
+      label: HUD type
+      options:
+        - Standard HUD with rocket CCIP
+        - No rocket CCIP
+        - HMD HUD
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: Tell us what you did and what happened.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: files
+    attributes:
+      label: Screenshots or saved design
+      description: Drag files here. Remove personal or account information first.
